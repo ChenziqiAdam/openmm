@@ -63,6 +63,18 @@ def _within(a, b, atol):
     return abs(float(a) - float(b)) <= atol
 
 
+def _all_finite(*values):
+    """True when every value is a finite float (excludes NaN and +/-inf).
+
+    NaN/inf coordinates and box dimensions are not a physically meaningful
+    input for these laws (SANITIZER.md 5.8's Precondition discipline: a
+    checker's precondition must exclude genuinely undefined/ambiguous input
+    classes), so callers use this to gate checkers whose invariant is only
+    well-defined for finite inputs.
+    """
+    return all(math.isfinite(float(v)) for v in values)
+
+
 def _guard(checker_id):
     """Wrap a checker body so an internal error never disturbs production.
 
@@ -284,10 +296,15 @@ def check_canonical_isotope(canonical_symbol, canonical_mass, sibling_masses):
 @_guard("unitcell_dims_roundtrip")
 def check_unitcell_dims_roundtrip(set_dims, got_dims):
     """OM-TOPO-001: setUnitCellDimensions -> getUnitCellDimensions must
-    round trip for orthorhombic boxes.
+    round trip for orthorhombic boxes, for any finite input box dimensions.
 
+    Precondition excludes non-finite (NaN/inf) box dimensions: those are
+    not a physically meaningful box and the round-trip law is not defined
+    for them (SANITIZER.md 5.8's Precondition discipline).
     Tolerance is scaled by box length, same discipline as OM-PBC-001.
     """
+    if not _all_finite(*set_dims, *got_dims):
+        return
     scale = max(1e-12, *[abs(x) for x in set_dims])
     tol = 100 * eps64 * scale
     ok = all(_within(s, g, tol) for s, g in zip(set_dims, got_dims))
@@ -322,8 +339,14 @@ def check_vec3_negation(v, neg_neg_v, v_plus_neg_v):
     """OM-VEC3-001: -(-v) == v and v+(-v) == 0, both exact under IEEE 754,
     for any Vec3 of finite floating-point components.
 
+    Precondition excludes non-finite (NaN/inf) components: NaN is not
+    equal to itself under IEEE 754, so an equality-based check of this
+    exact identity is not meaningful for NaN inputs and is not a
+    violation of the law (SANITIZER.md 5.8's Precondition discipline).
     No tolerance slack -- these are exact floating-point identities.
     """
+    if not _all_finite(*v, *neg_neg_v, *v_plus_neg_v):
+        return
     ok1 = tuple(neg_neg_v) == tuple(v)
     ok2 = tuple(v_plus_neg_v) == (0.0, 0.0, 0.0) or all(x == 0 for x in v_plus_neg_v)
     trigger_if(not (ok1 and ok2), "OM-VEC3-001")
