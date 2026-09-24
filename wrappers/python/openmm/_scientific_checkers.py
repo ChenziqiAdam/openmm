@@ -15,9 +15,8 @@ Scope rule (SANITIZER.md 5.6): every sanitizer in this bank guards a
 analysis law whose violation has a domain consequence. Pure arithmetic
 identities, range/finiteness checks, lookup-table round trips, and generic
 software correctness are explicitly out of scope and are not instrumented
-here. See ``scientific_bug_finding/openmm_pilot/LAW_CANDIDATES.md`` for the
-full law documents (precondition/invariant/observation/alarm/rationale) this
-module implements.
+here. See ``SCIENTIFIC_CHECKERS.json`` for each checker's precondition,
+invariant, observation point, and alarm predicate.
 """
 
 import json
@@ -99,10 +98,9 @@ def _guard(checker_id):
 def check_unit_roundtrip(original_value, unit1, roundtrip_value):
     """OM-UNIT-001: conversion round trip must reproduce the original value.
 
-    See LAW_CANDIDATES.md OM-UNIT-001. Precondition: any Quantity converted
-    to a compatible unit and back. Tolerance: 100*eps64*max(1,|value|),
-    matching the bit-exact agreement observed in a 9-pair x 6-scale sweep
-    (worst ratio 0.98x eps64) during tolerance derivation.
+    Precondition: any Quantity converted to a compatible unit and back.
+    Tolerance is scaled by the magnitude of the compared value
+    (SANITIZER.md 5.8's T discipline).
     """
     scale = max(1.0, abs(float(original_value)))
     tol = 100 * eps64 * scale
@@ -113,9 +111,8 @@ def check_unit_roundtrip(original_value, unit1, roundtrip_value):
 def check_conversion_transitivity(f12, f23, f13):
     """OM-UNIT-002: u1->u2->u3 factor product must equal u1->u3 directly.
 
-    See LAW_CANDIDATES.md OM-UNIT-002. Tolerance: 1e-9 relative -- a 4-group
-    sweep found bit-exact agreement (worst observed ~1.3e-16 relative);
-    1e-9 gives large headroom while still being far tighter than 1.0.
+    Tolerance is a fixed relative bound, far tighter than a spurious
+    factor-of-two/sign error but with headroom over float64 round-off.
     """
     direct = f12 * f23
     tol = 1e-9 * max(1.0, abs(f13))
@@ -126,8 +123,7 @@ def check_conversion_transitivity(f12, f23, f13):
 def check_conversion_inverse(f12, f21):
     """OM-UNIT-003: forward*reverse conversion factor must equal 1.0.
 
-    See LAW_CANDIDATES.md OM-UNIT-003. A pairwise sweep across 5 unit
-    groups found bit-exact (0.0) product error; tolerance set to 1e-9.
+    Tolerance is a fixed relative bound over float64 round-off.
     """
     trigger_if(not _within(f12 * f21, 1.0, 1e-9), "OM-UNIT-003")
 
@@ -136,8 +132,8 @@ def check_conversion_inverse(f12, f21):
 def check_unit_sqrt(original_quantity_value, reconstructed_value, scale):
     """OM-UNIT-004: (sqrt(u))**2 must reproduce u's conversion factor exactly.
 
-    See LAW_CANDIDATES.md OM-UNIT-004. A 6-scale sweep (1e-6..1e10) found
-    zero deviation; tolerance set to 100*eps64*sqrt(scale) for headroom.
+    Tolerance is scaled by sqrt of the value's magnitude (SANITIZER.md
+    5.8's T discipline).
     """
     tol = 100 * eps64 * max(1.0, math.sqrt(abs(scale)))
     trigger_if(not _within(original_quantity_value, reconstructed_value, tol), "OM-UNIT-004")
@@ -148,8 +144,8 @@ def check_sqrt_paths_agree(method_value, reference_value, scale):
     """OM-UNIT-005: Quantity.sqrt() must agree with an independent
     math.sqrt(value)+unit.sqrt() composition.
 
-    See LAW_CANDIDATES.md OM-UNIT-005. Same empirical tolerance derivation
-    as OM-UNIT-004 (zero observed deviation in the sweep).
+    Tolerance is scaled by sqrt of the value's magnitude, same discipline
+    as OM-UNIT-004.
     """
     tol = 100 * eps64 * max(1.0, math.sqrt(abs(scale)))
     trigger_if(not _within(method_value, reference_value, tol), "OM-UNIT-005")
@@ -160,8 +156,8 @@ def check_dot_norm_dimensions(dot_unit_compatible_with_square, norm_unit_compati
     """OM-UNIT-006: dot(x,x) must have unit compatible with base_unit**2,
     and norm(x) compatible with base_unit.
 
-    See LAW_CANDIDATES.md OM-UNIT-006. Structural check (unit compatibility
-    is boolean, not float), so no numerical tolerance is needed.
+    Structural check (unit compatibility is boolean, not float), so no
+    numerical tolerance is needed.
     """
     trigger_if(not dot_unit_compatible_with_square, "OM-UNIT-006")
     trigger_if(not norm_unit_compatible_with_base, "OM-UNIT-006")
@@ -171,9 +167,9 @@ def check_dot_norm_dimensions(dot_unit_compatible_with_square, norm_unit_compati
 def check_molar_gas_constant(value_si):
     """OM-UNIT-007: R must match the CODATA 2018/SI-exact reference value.
 
-    See LAW_CANDIDATES.md OM-UNIT-007. R is exact post-2019 SI
-    redefinition (NA and kB are both exact), so tolerance is a
-    transcription-error check, not a rounding-tolerance check.
+    R is exact post-2019 SI redefinition (NA and kB are both exact), so
+    tolerance is a transcription-error check, not a rounding-tolerance
+    check.
     """
     codata_r = 8.31446261815324  # J / (mol K), CODATA 2018, exact under 2019 SI
     trigger_if(not _within(value_si, codata_r, 1e-9 * codata_r), "OM-UNIT-007")
@@ -182,8 +178,6 @@ def check_molar_gas_constant(value_si):
 @_guard("speed_of_light_reference")
 def check_speed_of_light(value_si):
     """OM-UNIT-008: c must equal exactly 299792458 m/s (SI-exact since 1983).
-
-    See LAW_CANDIDATES.md OM-UNIT-008.
     """
     trigger_if(value_si != 299792458.0, "OM-UNIT-008")
 
@@ -198,13 +192,11 @@ def check_pbc_roundtrip(a, b, c, alpha, beta, gamma, a2, b2, c2, alpha2, beta2, 
     must reproduce the input lengths/angles, when the input already
     corresponds to a pre-reduced vector triple.
 
-    See LAW_CANDIDATES.md OM-PBC-001 for the precondition-narrowing history
-    (the naive "any valid box" precondition was falsified during tolerance
-    derivation -- OpenMM's mandatory box-vector reduction genuinely changes
-    lengths/angles for inputs that are not already reduced; this is
-    intentional, documented behavior, not a defect). Tolerance: 100*eps64
-    per unit scale for lengths, 100*eps64 for angles, matching a 20-case
-    sweep (worst observed ratio ~1.0x eps64).
+    Precondition restricted to already-reduced inputs: OpenMM's mandatory
+    box-vector reduction intentionally changes lengths/angles for inputs
+    that are not already reduced, which is documented behavior, not a
+    violation of this law. Tolerance is scaled by box length for lengths,
+    and is a fixed small bound for angles.
     """
     if not is_prereduced:
         return
@@ -227,8 +219,6 @@ def check_pbc_reduction_volume(volume_before, volume_after, scale):
     """OM-PBC-002: reducePeriodicBoxVectors must preserve the cell's
     determinant (volume) -- lattice reduction is a unimodular (det=1)
     shear transform.
-
-    See LAW_CANDIDATES.md OM-PBC-002.
     """
     tol = 100 * eps64 * max(1e-12, abs(scale)) ** 3
     trigger_if(not _within(volume_before, volume_after, tol), "OM-PBC-002")
@@ -239,7 +229,7 @@ def check_pbc_reduced_form(satisfies_topology_contract):
     """OM-PBC-003: reducePeriodicBoxVectors's output must satisfy
     Topology.setPeriodicBoxVectors's own reduced-form inequalities.
 
-    See LAW_CANDIDATES.md OM-PBC-003. Boolean structural check.
+    Boolean structural check.
     """
     trigger_if(not satisfies_topology_contract, "OM-PBC-003")
 
@@ -251,13 +241,8 @@ def check_pbc_reduced_form(satisfies_topology_contract):
 @_guard("element_getbymass_closest")
 def check_getbymass_closest(requested_mass, returned_symbol, true_closest_symbol):
     """OM-ELEM-001: getByMass must return the element whose tabulated mass
-    is truly closest (independent brute-force scan) to the query.
-
-    See LAW_CANDIDATES.md OM-ELEM-001. A 116-boundary sweep found this
-    checker fires on genuine OpenMM defects (duplicate-mass table entries
-    for Bk/Cm and Db/Lr silently make getByMass unable to ever return
-    curium or lawrencium) -- drafted, not filed, as
-    issues/ISSUE_1_getByMass_duplicate_mass_table_entries.md.
+    is truly closest (independent brute-force scan) to the query, for any
+    query mass in the range spanned by the built-in element table.
     """
     trigger_if(returned_symbol != true_closest_symbol, "OM-ELEM-001")
 
@@ -267,8 +252,6 @@ def check_canonical_isotope(canonical_symbol, canonical_mass, sibling_masses):
     """OM-ELEM-002: getByAtomicNumber must return the lightest element
     among those sharing an atomic number (the documented "canonical"
     choice, e.g. hydrogen over deuterium).
-
-    See LAW_CANDIDATES.md OM-ELEM-002.
     """
     if not sibling_masses:
         return
@@ -284,8 +267,7 @@ def check_unitcell_dims_roundtrip(set_dims, got_dims):
     """OM-TOPO-001: setUnitCellDimensions -> getUnitCellDimensions must
     round trip for orthorhombic boxes.
 
-    See LAW_CANDIDATES.md OM-TOPO-001. Tolerance derived the same way as
-    OM-PBC-001 (length-scaled eps64).
+    Tolerance is scaled by box length, same discipline as OM-PBC-001.
     """
     scale = max(1e-12, *[abs(x) for x in set_dims])
     tol = 100 * eps64 * scale
@@ -297,8 +279,6 @@ def check_unitcell_dims_roundtrip(set_dims, got_dims):
 def check_system_particle_count(num_particles, num_atoms):
     """OM-TOPO-002: System particle count must equal Topology atom count
     (createSystem's own documented contract).
-
-    See LAW_CANDIDATES.md OM-TOPO-002.
     """
     trigger_if(num_particles != num_atoms, "OM-TOPO-002")
 
@@ -307,10 +287,8 @@ def check_system_particle_count(num_particles, num_atoms):
 def check_total_mass_conserved(total_before, total_after, num_atoms):
     """OM-TOPO-003: total system mass must be unchanged by hydrogenMass
     repartitioning (createSystem's documented promise), checked as a
-    *global* sum independent of the pairwise transferMass arithmetic.
-
-    See LAW_CANDIDATES.md OM-TOPO-003 for why this is NOT the pairwise-sum
-    tautology SANITIZER.md 5.2 warns against.
+    *global* sum independent of the pairwise transferMass arithmetic
+    (not a restatement of that arithmetic's own local guarantee).
     """
     tol = 100 * eps64 * max(1, num_atoms) * max(1.0, abs(total_before))
     trigger_if(not _within(total_before, total_after, tol), "OM-TOPO-003")
@@ -322,10 +300,10 @@ def check_total_mass_conserved(total_before, total_after, num_atoms):
 
 @_guard("vec3_negation_involution")
 def check_vec3_negation(v, neg_neg_v, v_plus_neg_v):
-    """OM-VEC3-001: -(-v) == v and v+(-v) == 0, both exact under IEEE 754.
+    """OM-VEC3-001: -(-v) == v and v+(-v) == 0, both exact under IEEE 754,
+    for any Vec3 of finite floating-point components.
 
-    See LAW_CANDIDATES.md OM-VEC3-001. No tolerance slack -- these are
-    exact floating-point identities for any finite v.
+    No tolerance slack -- these are exact floating-point identities.
     """
     ok1 = tuple(neg_neg_v) == tuple(v)
     ok2 = tuple(v_plus_neg_v) == (0.0, 0.0, 0.0) or all(x == 0 for x in v_plus_neg_v)
@@ -344,9 +322,7 @@ def check_constrained_angle_length(law_of_cosines_length, independent_geometry_l
     at consistent 3D/2D positions and measure the Euclidean distance
     directly).
 
-    See LAW_CANDIDATES.md OM-FF-001. A 6-case sweep (bond lengths
-    1e-4..1.0, angles 10..179 degrees) found worst ratio ~3.2x eps64;
-    tolerance set to 100x for headroom.
+    Tolerance is scaled by the constraint distance's own magnitude.
     """
     tol = 100 * eps64 * max(1e-12, abs(scale))
     trigger_if(not _within(law_of_cosines_length, independent_geometry_length, tol), "OM-FF-001")
@@ -361,8 +337,6 @@ def check_modeller_add_counts(actual_atoms, expected_atoms, actual_bonds, expect
                                actual_residues, expected_residues, actual_chains, expected_chains):
     """OM-MOD-001: Modeller.add must conserve atom/bond/residue/chain
     counts (sum of the two input topologies' counts).
-
-    See LAW_CANDIDATES.md OM-MOD-001.
     """
     ok = (
         actual_atoms == expected_atoms

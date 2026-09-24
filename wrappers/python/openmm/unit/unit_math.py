@@ -151,11 +151,7 @@ def sqrt(val):
                 # machinery again) must reproduce the ORIGINAL quantity's
                 # value, expressed in result.unit**2 -- not val._value
                 # directly, since val may be expressed in a unit with a
-                # nontrivial conversion factor to result.unit**2 (e.g.
-                # kilogram*calorie vs kilogram*joule; comparing raw
-                # ._value fields across different units is a unit-mismatch
-                # bug, not a real discrepancy -- caught via
-                # sqrt(1.0*kilogram*calorie) during regression testing).
+                # nontrivial conversion factor to result.unit**2.
                 got_val = result.value_in_unit(result.unit)
                 squared = got_val * got_val
                 orig_in_squared_unit = val.value_in_unit(result.unit ** 2)
