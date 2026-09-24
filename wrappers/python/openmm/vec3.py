@@ -33,6 +33,11 @@ __version__ = "1.0"
 from . import unit
 from collections import namedtuple
 
+try:
+    from . import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 class Vec3(namedtuple('Vec3', ['x', 'y', 'z'])):
     """Vec3 is a 3-element tuple that supports many math operations."""
 
@@ -81,4 +86,12 @@ class Vec3(namedtuple('Vec3', ['x', 'y', 'z'])):
         return Vec3(self.x, self.y, self.z)
 
     def __neg__(self):
-        return Vec3(-self.x, -self.y, -self.z)
+        result = Vec3(-self.x, -self.y, -self.z)
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                neg_neg = Vec3(-result.x, -result.y, -result.z)
+                summed = Vec3(self.x + result.x, self.y + result.y, self.z + result.z)
+                _scibench_checkers.check_vec3_negation(self, neg_neg, summed)
+            except Exception:
+                pass
+        return result

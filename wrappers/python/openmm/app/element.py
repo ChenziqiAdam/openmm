@@ -33,6 +33,11 @@ __version__ = "1.0"
 import sys
 from collections import OrderedDict
 from openmm.unit import daltons, is_quantity
+
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
 if sys.version_info >= (3, 0):
     import copyreg
 else:
@@ -94,6 +99,23 @@ class Element(object):
         else:
             Element._elements_by_atomic_number[number] = self
 
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                canonical = Element._elements_by_atomic_number[number]
+                siblings = [
+                    e.mass.value_in_unit(daltons)
+                    for e in Element._elements_by_symbol.values()
+                    if e._atomic_number == number and e is not canonical
+                ]
+                if siblings:
+                    _scibench_checkers.check_canonical_isotope(
+                        canonical.symbol,
+                        canonical.mass.value_in_unit(daltons),
+                        siblings,
+                    )
+            except Exception:
+                pass
+
     @staticmethod
     def getBySymbol(symbol):
         """Get the Element with a particular chemical symbol."""
@@ -144,10 +166,25 @@ class Element(object):
                 diff = massdiff
             if elemmass > mass:
                 # Elements are only getting heavier, so bail out early
-                return best_guess
+                break
 
         # This really should only happen if we wanted ununoctium or something
         # bigger... won't really happen but still make sure we return an Element
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                true_best = None
+                true_diff = None
+                for e in Element._elements_by_symbol.values():
+                    d = abs(e.mass.value_in_unit(daltons) - mass)
+                    if true_diff is None or d < true_diff:
+                        true_diff = d
+                        true_best = e
+                if best_guess is not None and true_best is not None:
+                    _scibench_checkers.check_getbymass_closest(
+                        mass, best_guess.symbol, true_best.symbol
+                    )
+            except Exception:
+                pass
         return best_guess
 
     @property

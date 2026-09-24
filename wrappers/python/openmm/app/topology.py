@@ -38,6 +38,11 @@ from openmm.app.internal.singleton import Singleton
 from openmm.unit import nanometers, sqrt, is_quantity
 from copy import deepcopy
 
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 # Enumerated values for bond type
 
 class Single(Singleton):
@@ -256,6 +261,18 @@ class Topology(object):
             if vectors[0][0] <= 0*nanometers or vectors[1][1] <= 0*nanometers or vectors[2][2] <= 0*nanometers or vectors[0][0] < 2*abs(vectors[1][0]) or vectors[0][0] < 2*abs(vectors[2][0]) or vectors[1][1] < 2*abs(vectors[2][1]):
                 raise ValueError("Periodic box vectors must be in reduced form.");
         self._periodicBoxVectors = deepcopy(vectors)
+        # Any path that mutates _periodicBoxVectors other than
+        # setUnitCellDimensions itself must invalidate the OM-TOPO-001
+        # checker-only side channel below -- otherwise a stale recorded
+        # value from an earlier, unrelated setUnitCellDimensions call
+        # would be compared against box vectors set by this method,
+        # producing a false alarm (found during regression testing:
+        # TestForceField.py's setUp calls setUnitCellDimensions(2,2,2),
+        # then test_PeriodicBoxVectors calls setPeriodicBoxVectors with
+        # different vectors on the same Topology instance without ever
+        # calling setUnitCellDimensions again).
+        if hasattr(self, "_scibench_last_set_dims"):
+            del self._scibench_last_set_dims
 
     def getUnitCellDimensions(self):
         """Get the dimensions of the crystallographic unit cell.
@@ -267,6 +284,13 @@ class Topology(object):
         xsize = self._periodicBoxVectors[0][0].value_in_unit(nanometers)
         ysize = self._periodicBoxVectors[1][1].value_in_unit(nanometers)
         zsize = self._periodicBoxVectors[2][2].value_in_unit(nanometers)
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                recorded = getattr(self, "_scibench_last_set_dims", None)
+                if recorded is not None:
+                    _scibench_checkers.check_unitcell_dims_roundtrip(recorded, (xsize, ysize, zsize))
+            except Exception:
+                pass
         return Vec3(xsize, ysize, zsize)*nanometers
 
     def setUnitCellDimensions(self, dimensions):
@@ -280,6 +304,14 @@ class Topology(object):
             if is_quantity(dimensions):
                 dimensions = dimensions.value_in_unit(nanometers)
             self._periodicBoxVectors = (Vec3(dimensions[0], 0, 0), Vec3(0, dimensions[1], 0), Vec3(0, 0, dimensions[2]))*nanometers
+            if _scibench_checkers is not None and _scibench_checkers.enabled():
+                # Checker-only side channel (SANITIZER.md 8's "checker may
+                # read values already computed by production code"): this
+                # attribute is consulted only by getUnitCellDimensions's
+                # checker hook above, never by production code, and its
+                # presence/absence does not change any return value,
+                # exception, or public behavior.
+                self._scibench_last_set_dims = tuple(dimensions)
 
     @staticmethod
     def loadBondDefinitions(file):

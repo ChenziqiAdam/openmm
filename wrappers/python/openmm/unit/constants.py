@@ -44,6 +44,18 @@ MOLAR_GAS_CONSTANT_R = AVOGADRO_CONSTANT_NA * BOLTZMANN_CONSTANT_kB
 SPEED_OF_LIGHT_C = 2.99792458e8 * meter / second
 GRAVITATIONAL_CONSTANT_G = 6.6743e-11 * newton * meter**2 / kilogram**2
 
+try:
+    from .. import _scientific_checkers as _scibench_checkers
+    if _scibench_checkers is not None and _scibench_checkers.enabled():
+        _scibench_checkers.check_molar_gas_constant(
+            MOLAR_GAS_CONSTANT_R.value_in_unit(joule / (mole * kelvin))
+        )
+        _scibench_checkers.check_speed_of_light(
+            SPEED_OF_LIGHT_C.value_in_unit(meter / second)
+        )
+except Exception:
+    pass
+
 # run module directly for testing
 if __name__=='__main__':
     # Test the examples in the docstrings

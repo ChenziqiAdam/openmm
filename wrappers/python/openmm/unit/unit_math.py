@@ -38,6 +38,11 @@ import math
 from .quantity import is_quantity
 from .unit_definitions import *
 
+try:
+    from .. import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 ####################
 ### TRIGONOMETRY ###
 ####################
@@ -135,9 +140,29 @@ def sqrt(val):
     ArithmeticError: Exponents in Unit.sqrt() must be even.
     """
     try:
-        return val.sqrt()
+        result = val.sqrt()
     except AttributeError:
         return math.sqrt(val)
+    if _scibench_checkers is not None and _scibench_checkers.enabled():
+        try:
+            if is_quantity(val) and isinstance(result.value_in_unit(result.unit), (int, float)):
+                # OM-UNIT-005: squaring the result (via an independent
+                # __mul__ path, not result.unit's own sqrt/conversion
+                # machinery again) must reproduce the ORIGINAL quantity's
+                # value, expressed in result.unit**2 -- not val._value
+                # directly, since val may be expressed in a unit with a
+                # nontrivial conversion factor to result.unit**2 (e.g.
+                # kilogram*calorie vs kilogram*joule; comparing raw
+                # ._value fields across different units is a unit-mismatch
+                # bug, not a real discrepancy -- caught via
+                # sqrt(1.0*kilogram*calorie) during regression testing).
+                got_val = result.value_in_unit(result.unit)
+                squared = got_val * got_val
+                orig_in_squared_unit = val.value_in_unit(result.unit ** 2)
+                _scibench_checkers.check_sqrt_paths_agree(squared, orig_in_squared_unit, orig_in_squared_unit)
+        except Exception:
+            pass
+    return result
 
 ###########
 ### SUM ###
@@ -182,7 +207,18 @@ def norm(x):
     >>> norm((3, 4)*meter)
     Quantity(value=5.0, unit=meter)
     """
-    return sqrt(dot(x, x))
+    d = dot(x, x)
+    result = sqrt(d)
+    if _scibench_checkers is not None and _scibench_checkers.enabled():
+        try:
+            if is_quantity(x[0]):
+                base_unit = x[0].unit
+                dot_compat = is_quantity(d) and d.unit.is_compatible(base_unit ** 2)
+                norm_compat = is_quantity(result) and result.unit.is_compatible(base_unit)
+                _scibench_checkers.check_dot_norm_dimensions(dot_compat, norm_compat)
+        except Exception:
+            pass
+    return result
 
 # run module directly for testing
 if __name__=='__main__':

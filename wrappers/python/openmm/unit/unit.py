@@ -37,9 +37,17 @@ __version__ = "0.5"
 
 import math
 import sys
+import threading
 from .mymatrix import MyMatrix, zeros
 from .baseunit import BaseUnit
 from .standard_dimensions import *
+
+try:
+    from .. import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
+_conv_guard = threading.local()
 
 class Unit(object):
     """
@@ -404,6 +412,34 @@ class Unit(object):
         if not self in Unit._conversion_factor_cache:
             Unit._conversion_factor_cache[self] = {}
         Unit._conversion_factor_cache[self][other] = factor
+        if (
+            _scibench_checkers is not None
+            and _scibench_checkers.enabled()
+            and not getattr(_conv_guard, "active", False)
+        ):
+            _conv_guard.active = True
+            try:
+                # OM-UNIT-003: inverse factor product must be 1.0
+                f_rev = other.conversion_factor_to(self)
+                _scibench_checkers.check_conversion_inverse(factor, f_rev)
+                # OM-UNIT-002: transitivity through an independent
+                # intermediate unit already present in this conversion's
+                # own base-unit decomposition (a genuinely different unit
+                # object than self or other, when one exists).
+                for dim, base_unit in canonical_units.items():
+                    intermediate = Unit({base_unit: 1.0})
+                    if not intermediate.is_compatible(self):
+                        continue
+                    if intermediate == self or intermediate == other:
+                        continue
+                    f1 = self.conversion_factor_to(intermediate)
+                    f2 = intermediate.conversion_factor_to(other)
+                    _scibench_checkers.check_conversion_transitivity(f1, f2, factor)
+                    break
+            except Exception:
+                pass
+            finally:
+                _conv_guard.active = False
         return factor
 
     def in_unit_system(self, system):

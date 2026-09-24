@@ -34,6 +34,11 @@ from openmm import Vec3
 from openmm.unit import nanometers, is_quantity, norm, dot, radians
 import math
 
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 
 def computePeriodicBoxVectors(a_length, b_length, c_length, alpha, beta, gamma):
     """Convert lengths and angles to periodic box vectors.
@@ -73,9 +78,22 @@ def computePeriodicBoxVectors(a_length, b_length, c_length, alpha, beta, gamma):
 
     # Make sure they're in the reduced form required by OpenMM.
 
+    is_prereduced = (round(cx/a[0]) == 0 and round(cy/b[1]) == 0 and round(b[0]/a[0]) == 0)
+
     c = c - b*round(c[1]/b[1])
     c = c - a*round(c[0]/a[0])
     b = b - a*round(b[0]/a[0])
+
+    if _scibench_checkers is not None and _scibench_checkers.enabled():
+        try:
+            a2, b2, c2, al2, be2, ga2 = computeLengthsAndAngles((a, b, c)*nanometers)
+            _scibench_checkers.check_pbc_roundtrip(
+                a_length, b_length, c_length, alpha, beta, gamma,
+                a2, b2, c2, al2, be2, ga2, is_prereduced,
+            )
+        except Exception:
+            pass
+
     return (a, b, c)*nanometers
 
 def reducePeriodicBoxVectors(periodicBoxVectors):
@@ -90,9 +108,34 @@ def reducePeriodicBoxVectors(periodicBoxVectors):
     b = Vec3(*b)
     c = Vec3(*c)
 
+    volume_before = None
+    scale_before = None
+    if _scibench_checkers is not None and _scibench_checkers.enabled():
+        try:
+            volume_before = (a[0]*(b[1]*c[2]-b[2]*c[1]) - a[1]*(b[0]*c[2]-b[2]*c[0]) + a[2]*(b[0]*c[1]-b[1]*c[0]))
+            scale_before = max(abs(v) for v in (a[0],a[1],a[2],b[0],b[1],b[2],c[0],c[1],c[2]))
+        except Exception:
+            pass
+
     c = c - b*round(c[1]/b[1])
     c = c - a*round(c[0]/a[0])
     b = b - a*round(b[0]/a[0])
+
+    if _scibench_checkers is not None and _scibench_checkers.enabled() and volume_before is not None:
+        try:
+            volume_after = (a[0]*(b[1]*c[2]-b[2]*c[1]) - a[1]*(b[0]*c[2]-b[2]*c[0]) + a[2]*(b[0]*c[1]-b[1]*c[0]))
+            _scibench_checkers.check_pbc_reduction_volume(volume_before, volume_after, scale_before)
+
+            contract_ok = (
+                abs(a[1]) < 1e-9 and abs(a[2]) < 1e-9 and abs(b[2]) < 1e-9
+                and a[0] > 0 and b[1] > 0 and c[2] > 0
+                and a[0] >= 2*abs(b[0]) - 1e-9*max(1.0, abs(a[0]))
+                and a[0] >= 2*abs(c[0]) - 1e-9*max(1.0, abs(a[0]))
+                and b[1] >= 2*abs(c[1]) - 1e-9*max(1.0, abs(b[1]))
+            )
+            _scibench_checkers.check_pbc_reduced_form(contract_ok)
+        except Exception:
+            pass
 
     return (a, b, c) * nanometers
 

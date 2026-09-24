@@ -49,6 +49,11 @@ from copy import deepcopy
 from math import ceil, floor, sqrt
 from collections import defaultdict, namedtuple
 
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 class Modeller(object):
     """Modeller provides tools for editing molecular models, such as adding water or missing hydrogens.
 
@@ -102,6 +107,11 @@ class Modeller(object):
         """
         # Copy over the existing model.
 
+        _scibench_expected_atoms = self.topology.getNumAtoms() + addTopology.getNumAtoms()
+        _scibench_expected_bonds = self.topology.getNumBonds() + addTopology.getNumBonds()
+        _scibench_expected_residues = self.topology.getNumResidues() + addTopology.getNumResidues()
+        _scibench_expected_chains = self.topology.getNumChains() + addTopology.getNumChains()
+
         newTopology = Topology()
         newTopology.setPeriodicBoxVectors(self.topology.getPeriodicBoxVectors())
         newAtoms = {}
@@ -132,6 +142,17 @@ class Modeller(object):
             newTopology.addBond(newAtoms[bond[0]], newAtoms[bond[1]], bond.type, bond.order)
         self.topology = newTopology
         self.positions = newPositions
+
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                _scibench_checkers.check_modeller_add_counts(
+                    self.topology.getNumAtoms(), _scibench_expected_atoms,
+                    self.topology.getNumBonds(), _scibench_expected_bonds,
+                    self.topology.getNumResidues(), _scibench_expected_residues,
+                    self.topology.getNumChains(), _scibench_expected_chains,
+                )
+            except Exception:
+                pass
 
     def delete(self, toDelete):
         """Delete chains, residues, atoms, and bonds from the model.

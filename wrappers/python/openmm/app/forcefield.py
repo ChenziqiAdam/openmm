@@ -48,6 +48,11 @@ from openmm.app.internal.singleton import Singleton
 from openmm.app.internal import compiled, amoebaforces
 from openmm.app.internal.argtracker import ArgTracker
 
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 # Directories from which to load built in force fields.
 
 _dataDirectories = None
@@ -1320,6 +1325,8 @@ class ForceField(object):
         # Create the System and add atoms
 
         sys = mm.System()
+        _scibench_original_mass_total = 0.0
+        _scibench_track_mass = _scibench_checkers is not None and _scibench_checkers.enabled()
         for atom in topology.atoms():
             # Look up the atom type name, returning a helpful error message if it cannot be found.
             if atom not in data.atomType:
@@ -1335,6 +1342,11 @@ class ForceField(object):
             # Add the particle to the OpenMM system.
             mass = self._atomTypes[typename].mass
             sys.addParticle(mass)
+            if _scibench_track_mass:
+                try:
+                    _scibench_original_mass_total += mass.value_in_unit(unit.dalton)
+                except Exception:
+                    _scibench_track_mass = False
 
         # Adjust hydrogen masses if requested.
 
@@ -1348,6 +1360,17 @@ class ForceField(object):
                     transferMass = hydrogenMass-sys.getParticleMass(atom2.index)
                     sys.setParticleMass(atom2.index, hydrogenMass)
                     sys.setParticleMass(atom1.index, sys.getParticleMass(atom1.index)-transferMass)
+            if _scibench_track_mass:
+                try:
+                    total_after = sum(
+                        sys.getParticleMass(i).value_in_unit(unit.dalton)
+                        for i in range(sys.getNumParticles())
+                    )
+                    _scibench_checkers.check_total_mass_conserved(
+                        _scibench_original_mass_total, total_after, sys.getNumParticles()
+                    )
+                except Exception:
+                    pass
 
         # Set periodic boundary conditions.
 
@@ -1511,6 +1534,11 @@ class ForceField(object):
         for script in self._scripts:
             exec(script, locals())
         args.checkArgs(self.createSystem)
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                _scibench_checkers.check_system_particle_count(sys.getNumParticles(), topology.getNumAtoms())
+            except Exception:
+                pass
         return sys
 
 
@@ -2441,6 +2469,17 @@ class HarmonicAngleGenerator(object):
                             l2 = data.bonds[bond2].length
                             if l1 is not None and l2 is not None:
                                 length = sqrt(l1*l1 + l2*l2 - 2*l1*l2*cos(self.angle[i]))
+                                if _scibench_checkers is not None and _scibench_checkers.enabled():
+                                    try:
+                                        theta = self.angle[i]
+                                        p1x, p1y = l1, 0.0
+                                        p2x, p2y = l2*cos(theta), l2*math.sin(theta)
+                                        indep_length = math.sqrt((p1x-p2x)**2 + (p1y-p2y)**2)
+                                        _scibench_checkers.check_constrained_angle_length(
+                                            length, indep_length, max(l1, l2)
+                                        )
+                                    except Exception:
+                                        pass
                                 data.addConstraint(sys, angle[0], angle[2], length)
                     if self.k[i] != 0:
                         if not isConstrained or args.get('flexibleConstraints', False):

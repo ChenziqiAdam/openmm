@@ -72,8 +72,16 @@ __version__ = "0.5"
 
 import math
 import copy
+import threading
 from .standard_dimensions import *
 from .unit import Unit, is_unit, dimensionless
+
+try:
+    from .. import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
+_roundtrip_guard = threading.local()
 
 class Quantity(object):
     """Physical quantity, such as 1.3 meters per second.
@@ -451,7 +459,32 @@ class Quantity(object):
         unit_factor = self.unit.conversion_factor_to(new_unit*new_unit)
         if unit_factor != 1.0:
             new_value *= math.sqrt(unit_factor)
-        return Quantity(value=new_value, unit=new_unit)
+        result = Quantity(value=new_value, unit=new_unit)
+        if (
+            _scibench_checkers is not None
+            and _scibench_checkers.enabled()
+            and not getattr(_roundtrip_guard, "active", False)
+            and isinstance(self._value, (int, float))
+            and self._value >= 0
+        ):
+            # OM-UNIT-004: squaring the result must reproduce a Quantity
+            # convertible to the original (self.unit**2 -> new_unit**2
+            # conversion factor must be self-consistent). This re-derives
+            # the forward direction via an independent operator path
+            # (Quantity.__pow__/__mul__, not Unit.sqrt/conversion_factor_to
+            # again) rather than reusing this method's own arithmetic.
+            _roundtrip_guard.active = True
+            try:
+                squared_back = result * result  # independent __mul__ path
+                orig_in_squared_unit = self.value_in_unit(squared_back.unit) if is_quantity(squared_back) else None
+                if orig_in_squared_unit is not None:
+                    squared_val = squared_back._value if is_quantity(squared_back) else squared_back
+                    _scibench_checkers.check_unit_sqrt(orig_in_squared_unit, squared_val, self._value)
+            except Exception:
+                pass
+            finally:
+                _roundtrip_guard.active = False
+        return result
 
     def sum(self, *args, **kwargs):
         """
@@ -657,7 +690,26 @@ class Quantity(object):
         if not self.unit.is_compatible(other_unit):
             raise TypeError('Unit "%s" is not compatible with Unit "%s".' % (self.unit, other_unit))
         f = self.unit.conversion_factor_to(other_unit)
-        return self._change_units_with_factor(other_unit, f)
+        result = self._change_units_with_factor(other_unit, f)
+        if (
+            _scibench_checkers is not None
+            and _scibench_checkers.enabled()
+            and not getattr(_roundtrip_guard, "active", False)
+            and isinstance(self._value, (int, float))
+            and self.unit is not other_unit
+        ):
+            _roundtrip_guard.active = True
+            try:
+                back = result if is_quantity(result) else Quantity(result, other_unit)
+                f_back = other_unit.conversion_factor_to(self.unit)
+                rt = back._change_units_with_factor(self.unit, f_back)
+                rt_val = rt._value if is_quantity(rt) else rt
+                _scibench_checkers.check_unit_roundtrip(self._value, self.unit, rt_val)
+            except Exception:
+                pass
+            finally:
+                _roundtrip_guard.active = False
+        return result
 
     def _change_units_with_factor(self, new_unit, factor, post_multiply=True):
         # numpy arrays cannot be compared with 1.0, so just "try"
