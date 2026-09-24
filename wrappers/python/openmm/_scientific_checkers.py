@@ -248,21 +248,18 @@ def check_getbymass_closest(requested_mass, returned_symbol, true_closest_symbol
     query mass in the range spanned by the built-in element table, among
     elements that getByMass's own by-mass cache can represent at all.
 
-    Precondition excludes a query where BOTH (a) the returned element is
-    itself exactly as close to the query as the independently-scanned
-    closest element (returned_is_also_at_minimum_distance=True -- a genuine
-    tie between two live candidates) AND (b) the reference element remains
-    reachable in getByMass's own by-mass cache under its own tabulated mass
-    (true_closest_is_cache_reachable=True, ruling out a same-mass collision
-    that evicted it): "the" closest element is not uniquely defined by the
-    law when two live, individually-reachable candidates are exactly tied,
-    so a tie-break disagreement between them is not a violation.
-
-    This does NOT exempt (a) a non-tie mismatch (the returned element is
-    strictly farther than the reference) or (b) a mismatch where the
-    reference element has been evicted from the cache entirely (e.g. two
-    elements sharing one tabulated mass collide in a single-slot cache) --
-    both remain genuine defects in scope for the law.
+    Precondition excludes a query only when BOTH (a) the returned element
+    is itself exactly as close to the query as the independently-scanned
+    closest element (returned_is_also_at_minimum_distance=True) AND (b)
+    the reference element remains independently reachable through
+    getByMass's own by-mass cache under its own tabulated mass
+    (true_closest_is_cache_reachable=True): in that case both candidates
+    are live and exactly tied, so "the" closest element is not uniquely
+    defined by the law and a disagreement between them is not a
+    violation. Any query failing either condition -- the returned element
+    is strictly farther than the reference, or the reference element is
+    not independently reachable through the cache under its own tabulated
+    mass -- remains in scope, and a mismatch there is a violation.
     """
     if returned_is_also_at_minimum_distance and true_closest_is_cache_reachable:
         return
