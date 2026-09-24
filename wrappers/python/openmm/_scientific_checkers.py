@@ -132,10 +132,11 @@ def check_conversion_inverse(f12, f21):
 def check_unit_sqrt(original_quantity_value, reconstructed_value, scale):
     """OM-UNIT-004: (sqrt(u))**2 must reproduce u's conversion factor exactly.
 
-    Tolerance is scaled by sqrt of the value's magnitude (SANITIZER.md
-    5.8's T discipline).
+    Tolerance is scaled by the value's own magnitude, not its square root:
+    squaring sqrt(x) accumulates float64 round-off proportional to x itself
+    (SANITIZER.md 5.8's T discipline).
     """
-    tol = 100 * eps64 * max(1.0, math.sqrt(abs(scale)))
+    tol = 100 * eps64 * max(1.0, abs(scale))
     trigger_if(not _within(original_quantity_value, reconstructed_value, tol), "OM-UNIT-004")
 
 
@@ -144,10 +145,10 @@ def check_sqrt_paths_agree(method_value, reference_value, scale):
     """OM-UNIT-005: Quantity.sqrt() must agree with an independent
     math.sqrt(value)+unit.sqrt() composition.
 
-    Tolerance is scaled by sqrt of the value's magnitude, same discipline
-    as OM-UNIT-004.
+    Tolerance is scaled by the value's own magnitude, same discipline as
+    OM-UNIT-004.
     """
-    tol = 100 * eps64 * max(1.0, math.sqrt(abs(scale)))
+    tol = 100 * eps64 * max(1.0, abs(scale))
     trigger_if(not _within(method_value, reference_value, tol), "OM-UNIT-005")
 
 
@@ -239,11 +240,32 @@ def check_pbc_reduced_form(satisfies_topology_contract):
 # =====================================================================
 
 @_guard("element_getbymass_closest")
-def check_getbymass_closest(requested_mass, returned_symbol, true_closest_symbol):
-    """OM-ELEM-001: getByMass must return the element whose tabulated mass
+def check_getbymass_closest(requested_mass, returned_symbol, true_closest_symbol,
+                             returned_is_also_at_minimum_distance,
+                             true_closest_is_cache_reachable):
+    """OM-ELEM-001: getByMass must return an element whose tabulated mass
     is truly closest (independent brute-force scan) to the query, for any
-    query mass in the range spanned by the built-in element table.
+    query mass in the range spanned by the built-in element table, among
+    elements that getByMass's own by-mass cache can represent at all.
+
+    Precondition excludes a query where BOTH (a) the returned element is
+    itself exactly as close to the query as the independently-scanned
+    closest element (returned_is_also_at_minimum_distance=True -- a genuine
+    tie between two live candidates) AND (b) the reference element remains
+    reachable in getByMass's own by-mass cache under its own tabulated mass
+    (true_closest_is_cache_reachable=True, ruling out a same-mass collision
+    that evicted it): "the" closest element is not uniquely defined by the
+    law when two live, individually-reachable candidates are exactly tied,
+    so a tie-break disagreement between them is not a violation.
+
+    This does NOT exempt (a) a non-tie mismatch (the returned element is
+    strictly farther than the reference) or (b) a mismatch where the
+    reference element has been evicted from the cache entirely (e.g. two
+    elements sharing one tabulated mass collide in a single-slot cache) --
+    both remain genuine defects in scope for the law.
     """
+    if returned_is_also_at_minimum_distance and true_closest_is_cache_reachable:
+        return
     trigger_if(returned_symbol != true_closest_symbol, "OM-ELEM-001")
 
 

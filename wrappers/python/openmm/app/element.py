@@ -180,8 +180,16 @@ class Element(object):
                         true_diff = d
                         true_best = e
                 if best_guess is not None and true_best is not None:
+                    returned_diff = abs(best_guess.mass.value_in_unit(daltons) - mass)
+                    tied = (returned_diff == true_diff)
+                    true_best_mass = true_best.mass.value_in_unit(daltons)
+                    cached_at_true_mass = Element._elements_by_mass.get(true_best_mass)
+                    reachable = (
+                        cached_at_true_mass is not None
+                        and cached_at_true_mass.symbol == true_best.symbol
+                    )
                     _scibench_checkers.check_getbymass_closest(
-                        mass, best_guess.symbol, true_best.symbol
+                        mass, best_guess.symbol, true_best.symbol, tied, reachable
                     )
             except Exception:
                 pass
