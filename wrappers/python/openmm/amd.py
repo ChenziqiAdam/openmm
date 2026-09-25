@@ -33,6 +33,11 @@ __version__ = "1.0"
 from openmm import CustomIntegrator
 from openmm.unit import kilojoules_per_mole, is_quantity
 
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 class AMDIntegrator(CustomIntegrator):
     """AMDIntegrator implements the aMD integration algorithm.
 
@@ -91,7 +96,15 @@ class AMDIntegrator(CustomIntegrator):
             energy = energy*kilojoules_per_mole # Assume kJ/mole
         if (energy > E):
             return energy
-        return energy+(E-energy)*(E-energy)/(alpha+E-energy)
+        vStar = energy+(E-energy)*(E-energy)/(alpha+E-energy)
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                _scibench_checkers.check_amd_total_effective_energy(
+                    energy/kilojoules_per_mole, alpha/kilojoules_per_mole,
+                    E/kilojoules_per_mole, vStar/kilojoules_per_mole)
+            except Exception:
+                pass
+        return vStar
 
 
 class AMDForceGroupIntegrator(CustomIntegrator):
@@ -168,7 +181,15 @@ class AMDForceGroupIntegrator(CustomIntegrator):
         dE = 0.0*kilojoules_per_mole
         if (groupEnergy < EGroup):
             dE = dE + (EGroup-groupEnergy)*(EGroup-groupEnergy)/(alphaGroup+EGroup-groupEnergy)
-        return groupEnergy+dE
+        vStar = groupEnergy+dE
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                _scibench_checkers.check_amd_group_effective_energy(
+                    groupEnergy/kilojoules_per_mole, alphaGroup/kilojoules_per_mole,
+                    EGroup/kilojoules_per_mole, vStar/kilojoules_per_mole)
+            except Exception:
+                pass
+        return vStar
 
 
 
@@ -277,9 +298,20 @@ class DualAMDIntegrator(CustomIntegrator):
             totalEnergy = totalEnergy*kilojoules_per_mole # Assume kJ/mole
         if not is_quantity(groupEnergy):
             groupEnergy = groupEnergy*kilojoules_per_mole # Assume kJ/mole
-        dE = 0.0*kilojoules_per_mole
+        dETotal = 0.0*kilojoules_per_mole
         if (totalEnergy < ETotal):
-            dE = dE + (ETotal-totalEnergy)*(ETotal-totalEnergy)/(alphaTotal+ETotal-totalEnergy)
+            dETotal = (ETotal-totalEnergy)*(ETotal-totalEnergy)/(alphaTotal+ETotal-totalEnergy)
+        dEGroup = 0.0*kilojoules_per_mole
         if (groupEnergy < EGroup):
-            dE = dE + (EGroup-groupEnergy)*(EGroup-groupEnergy)/(alphaGroup+EGroup-groupEnergy)
-        return totalEnergy+dE
+            dEGroup = (EGroup-groupEnergy)*(EGroup-groupEnergy)/(alphaGroup+EGroup-groupEnergy)
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                _scibench_checkers.check_amd_total_effective_energy(
+                    totalEnergy/kilojoules_per_mole, alphaTotal/kilojoules_per_mole,
+                    ETotal/kilojoules_per_mole, (totalEnergy+dETotal)/kilojoules_per_mole)
+                _scibench_checkers.check_amd_group_effective_energy(
+                    groupEnergy/kilojoules_per_mole, alphaGroup/kilojoules_per_mole,
+                    EGroup/kilojoules_per_mole, (groupEnergy+dEGroup)/kilojoules_per_mole)
+            except Exception:
+                pass
+        return totalEnergy+dETotal+dEGroup

@@ -429,3 +429,50 @@ def check_exchange_criterion_consistency(exponent_uniform, ei_si_kt, ei_sj_kt, e
     scale = max(abs(ei_si_kt), abs(ei_sj_kt), abs(ej_sj_kt), abs(ej_si_kt), 1e-12)
     tol = 1e6 * eps64 * scale
     trigger_if(not _within(exponent_uniform, exponent_explicit, tol), "OM-SAMP-002")
+
+
+# =====================================================================
+# amd.py -- aMD boost-energy formula vs. compiled force-scale factor
+# =====================================================================
+
+def _check_amd_effective_energy(energy, alpha, E, v_star, checker_id):
+    """Shared body for OM-AMD-001/002: E - V* must equal
+    alpha*(1 - alpha/(alpha+E-energy)) -- an exact algebraic identity
+    relating the Python boost-energy formula to the literal force-scale
+    sub-term (alpha/(alpha+E-energy)) embedded in the compiled engine's
+    addComputePerDof expression string. Precondition: energy <= E (the
+    boosted regime); for energy > E the compiled expression's own
+    modify=step(E-energy) disables the boost on a different branch this
+    law does not cover.
+
+    Tolerance scaled by the larger energy-difference magnitude involved;
+    empirically derived from a 200,000-trial sweep (see
+    LAW_CANDIDATES.md OM-AMD-001).
+    """
+    if not _all_finite(energy, alpha, E, v_star) or energy > E:
+        return
+    denom = alpha + E - energy
+    if denom == 0:
+        return
+    scale = alpha / denom
+    lhs = E - v_star
+    rhs = alpha * (1 - scale)
+    tol = 1e6 * eps64 * max(1.0, abs(alpha), abs(E - energy))
+    trigger_if(not _within(lhs, rhs, tol), checker_id)
+
+
+@_guard("amd_total_energy_effective_energy")
+def check_amd_total_effective_energy(energy, alpha, E, v_star):
+    """OM-AMD-001: AMDIntegrator/DualAMDIntegrator's total-energy boost
+    term. See _check_amd_effective_energy for the shared invariant.
+    """
+    _check_amd_effective_energy(energy, alpha, E, v_star, "OM-AMD-001")
+
+
+@_guard("amd_group_energy_effective_energy")
+def check_amd_group_effective_energy(energy, alpha, E, v_star):
+    """OM-AMD-002: AMDForceGroupIntegrator/DualAMDIntegrator's
+    force-group-energy boost term. See _check_amd_effective_energy for
+    the shared invariant.
+    """
+    _check_amd_effective_energy(energy, alpha, E, v_star, "OM-AMD-002")
