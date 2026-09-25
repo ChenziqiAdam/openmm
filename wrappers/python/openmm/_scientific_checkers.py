@@ -476,3 +476,37 @@ def check_amd_group_effective_energy(energy, alpha, E, v_star):
     the shared invariant.
     """
     _check_amd_effective_energy(energy, alpha, E, v_star, "OM-AMD-002")
+
+
+# =====================================================================
+# app/metadynamics.py -- well-tempered metadynamics bias accumulation
+# =====================================================================
+
+@_guard("metadynamics_bias_accumulator_bound")
+def check_metadynamics_bias_bound(total_bias_max, running_height_sum):
+    """OM-META-001: the accumulated bias at any grid point must never
+    exceed the sum of all Gaussian heights ever added, in the
+    single-process case (Metadynamics.biasDir is None). Each Gaussian
+    contribution to any single grid point is bounded by height*1.0 (the
+    per-axis Gaussian kernel, and any outer product of per-axis kernels
+    each in [0,1], peaks at 1.0), and _totalBias accumulates additively
+    across calls, so the running maximum can never exceed the running
+    sum of heights added.
+
+    running_height_sum is an independent accumulator (SANITIZER.md 5.2):
+    it is incremented once per _addGaussian call, alongside but not
+    derived from the _totalBias array arithmetic itself -- comparing
+    totalBias's own array against a quantity it was built from would be
+    tautological; this compares it against a genuinely separate running
+    total.
+
+    Precondition (biasDir is None) excludes the multi-process case: when
+    biases from other processes are loaded via _syncWithDisk, _totalBias
+    incorporates those processes' own accumulated heights, which this
+    process's running_height_sum does not track, so the bound would not
+    hold in general for that case.
+    """
+    if not _all_finite(total_bias_max, running_height_sum):
+        return
+    tol = 1e6 * eps64 * max(1.0, abs(running_height_sum))
+    trigger_if(total_bias_max - running_height_sum > tol, "OM-META-001")

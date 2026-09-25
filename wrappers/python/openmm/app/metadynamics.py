@@ -36,6 +36,11 @@ try:
 except:
     pass
 
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 
 class Metadynamics(object):
     """Performs metadynamics.
@@ -120,6 +125,7 @@ class Metadynamics(object):
         self._saveIndex = 0
         self._selfBias = np.zeros(tuple(v.gridWidth for v in reversed(variables)))
         self._totalBias = np.zeros(tuple(v.gridWidth for v in reversed(variables)))
+        self._runningHeightSum = 0.0
         self._loadedBiases = {}
         self._syncWithDisk()
         self._deltaT = temperature*(biasFactor-1)
@@ -217,6 +223,13 @@ class Metadynamics(object):
         height = height.value_in_unit(unit.kilojoules_per_mole)
         self._selfBias += height*gaussian
         self._totalBias += height*gaussian
+        self._runningHeightSum += height
+        if self.biasDir is None and _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                _scibench_checkers.check_metadynamics_bias_bound(
+                    float(self._totalBias.max()), self._runningHeightSum)
+            except Exception:
+                pass
         if len(self.variables) == 1:
             self._table.setFunctionParameters(self._totalBias.flatten(), *self._limits)
         else:
