@@ -387,3 +387,45 @@ def check_modeller_add_counts(actual_atoms, expected_atoms, actual_bonds, expect
         and actual_chains == expected_chains
     )
     trigger_if(not ok, "OM-MOD-001")
+
+
+# =====================================================================
+# app/expandedensemblesampler.py, app/replicaexchangesampler.py --
+# state-selection / exchange samplers
+# =====================================================================
+
+@_guard("expanded_ensemble_probability_normalization")
+def check_probability_normalization(probability):
+    """OM-SAMP-001: the log-sum-exp-normalized state probabilities in
+    ExpandedEnsembleSampler.attemptStateChange must sum to 1.0.
+
+    Tolerance scaled by the number of terms (standard floating-point
+    summation error bound); empirically derived from a 200,000-trial
+    sweep (see LAW_CANDIDATES.md OM-SAMP-001).
+    """
+    if not _all_finite(*probability):
+        return
+    n = max(1, len(probability))
+    tol = 100 * eps64 * n
+    trigger_if(not _within(sum(probability), 1.0, tol), "OM-SAMP-001")
+
+
+@_guard("replica_exchange_criterion_consistency")
+def check_exchange_criterion_consistency(exponent_uniform, ei_si_kt, ei_sj_kt, ej_sj_kt, ej_si_kt):
+    """OM-SAMP-002: when ReplicaExchangeSampler.exchangeReplicas uses the
+    uniform-kT Metropolis exponent formula, it must agree with the
+    explicit-per-state-kT formula evaluated at a common temperature --
+    two independently-coded expressions of the same exchange criterion.
+    Arguments are already-reduced (dimensionless, divided by kT) energies,
+    matching how the production code itself collapses Quantity/Quantity
+    division to a plain float.
+
+    Tolerance scaled by the largest reduced-energy term; empirically
+    derived from a 200,000-trial sweep (see LAW_CANDIDATES.md OM-SAMP-002).
+    """
+    if not _all_finite(exponent_uniform, ei_si_kt, ei_sj_kt, ej_sj_kt, ej_si_kt):
+        return
+    exponent_explicit = (ei_si_kt - ej_si_kt) + (ej_sj_kt - ei_sj_kt)
+    scale = max(abs(ei_si_kt), abs(ei_sj_kt), abs(ej_sj_kt), abs(ej_si_kt), 1e-12)
+    tol = 1e6 * eps64 * scale
+    trigger_if(not _within(exponent_uniform, exponent_explicit, tol), "OM-SAMP-002")

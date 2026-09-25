@@ -39,6 +39,11 @@ import math
 import pickle
 import random
 
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 class ExpandedEnsembleSampler(object):
     """
     ExpandedEnsembleSampler uses the expanded ensemble method to simulate a system in a collection of thermodynamic
@@ -305,6 +310,11 @@ class ExpandedEnsembleSampler(object):
         maxLogProb = max(logProbability)
         offset = maxLogProb + math.log(sum(math.exp(x-maxLogProb) for x in logProbability))
         probability = [math.exp(x-offset) for x in logProbability]
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                _scibench_checkers.check_probability_normalization(probability)
+            except Exception:
+                pass
 
         # Select a new state.
 

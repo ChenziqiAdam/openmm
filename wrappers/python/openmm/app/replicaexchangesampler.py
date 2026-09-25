@@ -33,6 +33,11 @@ from openmm.app.internal.multistatesampler import MultistateSampler
 import math
 import random
 
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 class ReplicaExchangeSampler(object):
     """
     ReplicaExchangeSampler uses replica exchange to simulate a system in a collection of thermodynamic states.  It supports
@@ -270,6 +275,14 @@ class ReplicaExchangeSampler(object):
             if self._kT is None:
                 kT = unit.MOLAR_GAS_CONSTANT_R*self.simulation.integrator.getTemperature()
                 exponent = (self.replicaStateEnergy[i][si]-self.replicaStateEnergy[i][sj]+self.replicaStateEnergy[j][sj]-self.replicaStateEnergy[j][si])/kT
+                if _scibench_checkers is not None and _scibench_checkers.enabled():
+                    try:
+                        _scibench_checkers.check_exchange_criterion_consistency(
+                            exponent,
+                            self.replicaStateEnergy[i][si]/kT, self.replicaStateEnergy[i][sj]/kT,
+                            self.replicaStateEnergy[j][sj]/kT, self.replicaStateEnergy[j][si]/kT)
+                    except Exception:
+                        pass
             else:
                 exponent = (self.replicaStateEnergy[i][si]-self.replicaStateEnergy[j][si])/self._kT[si] + (self.replicaStateEnergy[j][sj]-self.replicaStateEnergy[i][sj])/self._kT[sj]
             prob = min(1.0, math.exp(exponent))
