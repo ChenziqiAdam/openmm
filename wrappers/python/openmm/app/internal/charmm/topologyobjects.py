@@ -36,6 +36,11 @@ from openmm.app.internal.charmm.exceptions import (
                 MissingParameter)
 import openmm.unit as u
 
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 TINY = 1e-8
 
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1248,6 +1253,12 @@ class _CmapGrid(object):
             for j in range(res):
                 # Start from the middle
                 newgrid[i, j] = self[(i+mid)%res, (j+mid)%res]
+        if _scibench_checkers is not None and _scibench_checkers.enabled():
+            try:
+                _scibench_checkers.check_cmap_switch_range_bijection(
+                    list(self._data), list(newgrid._data))
+            except Exception:
+                pass
         return newgrid
 
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

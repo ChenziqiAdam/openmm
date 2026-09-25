@@ -554,3 +554,44 @@ def check_nbfix_reciprocity(atom1_name, atom2_name, params_from_1, params_from_2
     if not _all_finite(*params_from_1) or not _all_finite(*params_from_2):
         return
     trigger_if(tuple(params_from_1) != tuple(params_from_2), "OM-CHARMM-001")
+
+
+@_guard("charmm_cmap_switch_range_bijection")
+def check_cmap_switch_range_bijection(original_data, switched_data):
+    """OM-CHARMM-002: _CmapGrid.switch_range() re-expresses a CMAP
+    backbone-dihedral energy correction surface in a different angular
+    coordinate convention (-180..180 degrees vs. 0..360 degrees), via a
+    circular index shift. The physical correction-map surface itself --
+    the set of energy values on the grid -- must not change; only the
+    (phi, psi) angle labeling of each grid cell changes. switch_range
+    must therefore be a bijection on grid values: every value present
+    before must be present after, exactly once, with none created or
+    dropped (SANITIZER.md 5.2's "stronger sanitizer" pattern: checking a
+    semantic property -- the correction-map's physical content -- across
+    a nontrivial transformation, not restating the transformation's own
+    index arithmetic).
+
+    This is a genuine domain consequence, not internal bookkeeping:
+    CharmmPsfFile.createSystem feeds grid.switch_range().T directly into
+    CMAPTorsionForce.addMap, so this transformed grid becomes the actual
+    energy correction surface evaluated by the compiled engine at every
+    simulation step for CMAP-corrected backbone dihedrals. A bijection
+    violation (a duplicated or dropped energy value) would silently
+    install a corrupted correction surface -- either double-counting an
+    energy value at the expense of losing another the force field author
+    intended, changing the shape of the backbone free-energy landscape.
+
+    original_data / switched_data are the already-computed internal grid
+    lists as production code stores them, read directly (not
+    re-implementing the (i+mid)%res shift here).
+
+    Precondition: none -- a grid of any resolution >= 1 is a valid CMAP
+    input, and value-multiset preservation holds for every resolution
+    (unlike a literal double-application involution check, which is only
+    exact for even resolutions, since (res//2)*2 != res for odd res --
+    that is a real mathematical fact about the truncating shift, not a
+    defect, so it is deliberately not the law asserted here).
+    """
+    if not _all_finite(*original_data) or not _all_finite(*switched_data):
+        return
+    trigger_if(sorted(original_data) != sorted(switched_data), "OM-CHARMM-002")
