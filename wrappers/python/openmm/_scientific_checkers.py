@@ -595,3 +595,94 @@ def check_cmap_switch_range_bijection(original_data, switched_data):
     if not _all_finite(*original_data) or not _all_finite(*switched_data):
         return
     trigger_if(sorted(original_data) != sorted(switched_data), "OM-CHARMM-002")
+
+
+# =====================================================================
+# app/internal/amber_file_parser.py -- AMBER prmtop/restart parsing
+# =====================================================================
+
+@_guard("amber_lj_diagonal_inverse_combining_rule")
+def check_amber_lj_diagonal_roundtrip(acoef, bcoef, rmin, epsilon):
+    """OM-AMBER-001: for an AMBER prmtop atom type with no NBFIX
+    off-diagonal override, PrmtopLoader.getNonbondTerms derives
+    (rMin, epsilon) from the diagonal Lennard-Jones (A, B) coefficients
+    via rMin=(2A/B)^(1/6), epsilon=0.25*B^2/A -- the standard AMBER
+    self-interaction combining rule. The inverse relation must also
+    hold: A == epsilon*rMin^12, B == 2*epsilon*rMin^6. This is not a
+    re-derivation of the forward formula -- it checks the algebraically
+    independent inverse direction (SANITIZER.md 5.2).
+
+    This is a genuine domain consequence, not internal bookkeeping:
+    readAmberSystem passes (rVdw, epsilon) directly into
+    NonbondedForce.addParticle for every particle without NBFIX -- the
+    exact per-particle Lennard-Jones parameters the compiled engine
+    integrates at every simulation step. A drift between the forward
+    derivation and its inverse would mean the returned (rMin, epsilon)
+    does not actually correspond to the (A, B) coefficients on record in
+    the prmtop file, silently installing the wrong LJ well depth/radius
+    for that atom type.
+
+    acoef/bcoef/rmin/epsilon are passed in AMBER's own internal units
+    (angstrom, kcal/mol) as already read/computed by production code,
+    not re-converted here.
+
+    Precondition: acoef and bcoef both nonzero (a zero-zero diagonal
+    entry is a documented "no LJ parameters for this type" case handled
+    separately by production code's own ZeroDivisionError branch, not a
+    violation of this law).
+    """
+    if not _all_finite(acoef, bcoef, rmin, epsilon):
+        return
+    if acoef == 0 or bcoef == 0:
+        return
+    a_pred = epsilon * rmin**12
+    b_pred = 2 * epsilon * rmin**6
+    tol_a = 1e6 * eps64 * max(abs(acoef), abs(a_pred), 1e-12)
+    tol_b = 1e6 * eps64 * max(abs(bcoef), abs(b_pred), 1e-12)
+    trigger_if(
+        not _within(a_pred, acoef, tol_a) or not _within(b_pred, bcoef, tol_b),
+        "OM-AMBER-001",
+    )
+
+
+@_guard("amber_velocity_scale_reference")
+def check_amber_velscale_reference(velscale):
+    """OM-AMBER-002: VELSCALE, the AMBER ASCII-restart-file velocity unit
+    conversion constant (raw file units of 1/20.455 Angstrom/picosecond
+    -> Angstrom/picosecond), must match its first-principles derivation
+    from AMBER's internal unit system. AMBER defines its internal time
+    unit tau by dimensional consistency of kinetic energy
+    (0.5*m*v^2) with mass in amu, length in Angstrom, and energy in
+    kcal/mol: tau = sqrt(amu*Angstrom^2/(kcal/mol)), and VELSCALE =
+    1/tau in ps^-1 -- the same physical-constant-reference-value pattern
+    as OM-UNIT-007/008, checked against an independently-computed
+    reference derived from CODATA mass/length/energy-unit constants (not
+    against any value defined elsewhere in this file).
+
+    This is a genuine domain consequence, not internal bookkeeping:
+    AmberAsciiRestart._parse multiplies every raw velocity component by
+    VELSCALE before storing self.velocities, which AmberInpcrdFile.
+    getVelocities returns directly -- the standard path to
+    Context.setVelocities. A transcription error in this constant would
+    silently bias the kinetic energy and instantaneous temperature of
+    every simulation initialized from an AMBER restart file with
+    velocities.
+
+    Tolerance is loose (1e-4 relative) because the reference AMBER
+    codebase itself hard-codes a 6-significant-figure rounded value
+    (20.455) rather than the full first-principles derivation
+    (20.454828284407..., 8.4e-6 relative difference) -- this is AMBER's
+    own historical convention, not a defect, so the tolerance must
+    accommodate it while still catching a plausible single-digit
+    transcription error (e.g. 20.445, 20.045, 24.055).
+    """
+    if not _all_finite(velscale):
+        return
+    amu_kg = 1.66053906660e-27
+    angstrom_m = 1e-10
+    avogadro = 6.02214076e23
+    kcal_per_mol_j = 4184.0 / avogadro
+    tau_s = math.sqrt(amu_kg * angstrom_m**2 / kcal_per_mol_j)
+    tau_ps = tau_s * 1e12
+    reference_velscale = 1.0 / tau_ps
+    trigger_if(not _within(velscale, reference_velscale, 1e-4 * reference_velscale), "OM-AMBER-002")

@@ -48,6 +48,11 @@ except:
     np = None
 
 import openmm.unit as units
+
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
 import openmm
 from openmm.app import element as elem
 from openmm.app.internal.unitcell import computePeriodicBoxVectors
@@ -76,6 +81,12 @@ POINTER_LABEL_LIST = POINTER_LABELS.replace(',', '').split()
 
 VELSCALE = 20.455 # velocity conversion factor to angstroms/picosecond
 TINY = 1.0e-8
+
+if _scibench_checkers is not None and _scibench_checkers.enabled():
+    try:
+        _scibench_checkers.check_amber_velscale_reference(VELSCALE)
+    except Exception:
+        pass
 
 class NbfixPresent(Exception):
     """ Exception raised when NBFIX is used for the Lennard-Jones terms """
@@ -331,6 +342,13 @@ class PrmtopLoader(object):
             except ZeroDivisionError:
                 rMin = 1.0
                 epsilon = 0.0
+            else:
+                if _scibench_checkers is not None and _scibench_checkers.enabled():
+                    try:
+                        _scibench_checkers.check_amber_lj_diagonal_roundtrip(
+                            acoef, bcoef, rMin, epsilon)
+                    except Exception:
+                        pass
             type_parameters[atomTypeIndexes[iAtom]-1] = (rMin/2.0, epsilon)
             rVdw = rMin/2.0*lengthConversionFactor
             epsilon = epsilon*energyConversionFactor
