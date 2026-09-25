@@ -510,3 +510,47 @@ def check_metadynamics_bias_bound(total_bias_max, running_height_sum):
         return
     tol = 1e6 * eps64 * max(1.0, abs(running_height_sum))
     trigger_if(total_bias_max - running_height_sum > tol, "OM-META-001")
+
+
+# =====================================================================
+# app/charmmparameterset.py -- NBFIX Lennard-Jones pair symmetry
+# =====================================================================
+
+@_guard("charmm_nbfix_reciprocity")
+def check_nbfix_reciprocity(atom1_name, atom2_name, params_from_1, params_from_2):
+    """OM-CHARMM-001: a CHARMM NBFIX term overrides the Lennard-Jones
+    interaction between a specific pair of atom types. The Lennard-Jones
+    pair potential is symmetric under particle exchange -- the
+    interaction energy between atom type A and atom type B cannot depend
+    on which one is labeled "first" -- so the stored per-atom-type NBFIX
+    entries must be reciprocal: A's entry for B must equal B's entry for
+    A (rmin, epsilon, rmin14, epsilon14).
+
+    This is a genuine domain consequence, not internal bookkeeping:
+    CharmmPsfFile.createSystem builds the CustomNonbondedForce
+    acoef/bcoef tabulated-function matrix by looking up
+    ``lj_type_list[i].nbfix[lj_type_list[j].name]`` independently for
+    each ordered pair (i, j) (see charmmpsffile.py). A non-reciprocal
+    NBFIX entry produces an asymmetric acoef/bcoef matrix, i.e. a
+    simulated force where the energy of particle A pushing on B differs
+    from B pushing on A -- an unphysical, non-Newtonian pairwise
+    potential.
+
+    params_from_1 / params_from_2 are the already-looked-up
+    ``AtomType.nbfix`` dict entries (each a 4-tuple or None), read
+    directly from production state -- this does not re-derive the NBFIX
+    parsing logic, only compares two independently stored copies of what
+    should be the same physical quantity (SANITIZER.md 5.2).
+
+    Precondition: both entries must be present (an NBFIX line always
+    calls add_nbfix on both atom types in the same statement, so by the
+    time this observation point is reached after a successful NBFIX
+    parse, both should already exist; a None here means the pair hasn't
+    finished parsing yet, e.g. one atom type was undefined and silently
+    skipped -- covered separately, not this law).
+    """
+    if params_from_1 is None or params_from_2 is None:
+        return
+    if not _all_finite(*params_from_1) or not _all_finite(*params_from_2):
+        return
+    trigger_if(tuple(params_from_1) != tuple(params_from_2), "OM-CHARMM-001")

@@ -42,6 +42,11 @@ from openmm.app.internal.charmm.exceptions import CharmmFileError
 from openmm.app.element import Element, get_by_symbol
 import warnings
 
+try:
+    from openmm import _scientific_checkers as _scibench_checkers
+except Exception:
+    _scibench_checkers = None
+
 class CharmmParameterSet(object):
     """
     Stores a parameter set defined by CHARMM files. It stores the equivalent of
@@ -513,6 +518,15 @@ class CharmmParameterSet(object):
                                                            rmin14, emin14)
                         self.atom_types_str[at2].add_nbfix(at1, rmin, emin,
                                                            rmin14, emin14)
+                        if _scibench_checkers is not None and _scibench_checkers.enabled():
+                            try:
+                                _scibench_checkers.check_nbfix_reciprocity(
+                                    at1, at2,
+                                    self.atom_types_str[at1].nbfix.get(at2),
+                                    self.atom_types_str[at2].nbfix.get(at1),
+                                )
+                            except Exception:
+                                pass
                     except KeyError:
                         # Some stream files define NBFIX terms with an atom that
                         # is defined in another toppar file that does not
