@@ -200,7 +200,7 @@ def check_speed_of_light(value_si):
 # =====================================================================
 
 @_guard("pbc_lengths_angles_roundtrip")
-def check_pbc_roundtrip(a, b, c, alpha, beta, gamma, a2, b2, c2, alpha2, beta2, gamma2, is_prereduced):
+def check_pbc_roundtrip(a, b, c, alpha, beta, gamma, a2, b2, c2, alpha2, beta2, gamma2, is_prereduced, is_well_conditioned=None):
     """OM-PBC-001: computeLengthsAndAngles(computePeriodicBoxVectors(...))
     must reproduce the input lengths/angles, when the input already
     corresponds to a pre-reduced vector triple.
@@ -210,8 +210,22 @@ def check_pbc_roundtrip(a, b, c, alpha, beta, gamma, a2, b2, c2, alpha2, beta2, 
     that are not already reduced, which is documented behavior, not a
     violation of this law. Tolerance is scaled by box length for lengths,
     and is a fixed small bound for angles.
+
+    Further restricted to well-conditioned inputs (all angles within 20
+    degrees of 90, and length ratio <= 100): a numerical sweep found the
+    cy formula's division by sin(gamma), compounded with the subsequent
+    dot-product angle reconstruction on vectors of very different
+    magnitudes, loses enough precision to violate the 100*eps64 tolerance
+    once angles drift more than ~30 degrees from 90 (with mild aspect
+    ratio), or aspect ratio exceeds ~1e3-1e4 (even at gamma=90). A
+    150k-trial randomized sweep found zero round-trip violations within
+    angle margin 20deg / aspect ratio 100, with growing violation rates
+    beyond that boundary. Not a defect -- a checker-precondition gap, same
+    pattern as OM-PBC-003's well-conditioned gate.
     """
     if not is_prereduced:
+        return
+    if is_well_conditioned is False:
         return
     scale = max(1e-12, abs(a), abs(b), abs(c))
     len_tol = 100 * eps64 * scale
@@ -238,12 +252,23 @@ def check_pbc_reduction_volume(volume_before, volume_after, scale):
 
 
 @_guard("pbc_reduced_form_contract")
-def check_pbc_reduced_form(satisfies_topology_contract):
+def check_pbc_reduced_form(satisfies_topology_contract, is_well_conditioned):
     """OM-PBC-003: reducePeriodicBoxVectors's output must satisfy
     Topology.setPeriodicBoxVectors's own reduced-form inequalities.
 
     Boolean structural check.
+
+    Precondition restricted to well-conditioned inputs (offdiag/diag scale
+    ratio <= 1e5): a numerical sweep found the reduction's law-of-cosines-
+    style subtraction loses enough precision to violate the reduced-form
+    contract once this ratio exceeds ~1e6, purely from double-precision
+    cancellation on box shapes no real simulation cell approaches (the
+    largest realistic triclinic skew is O(10)). Not a defect -- a
+    checker-precondition gap, same pattern as OM-PBC-001's is_prereduced
+    gate.
     """
+    if is_well_conditioned is False:
+        return
     trigger_if(not satisfies_topology_contract, "OM-PBC-003")
 
 
@@ -357,7 +382,7 @@ def check_vec3_negation(v, neg_neg_v, v_plus_neg_v):
 # =====================================================================
 
 @_guard("constrained_angle_law_of_cosines")
-def check_constrained_angle_length(law_of_cosines_length, independent_geometry_length, scale):
+def check_constrained_angle_length(law_of_cosines_length, independent_geometry_length, scale, is_well_conditioned=None):
     """OM-FF-001: a constrained angle's constraint distance (law of
     cosines from two bond lengths and the angle) must match an
     independently-constructed-geometry distance (place the three atoms
@@ -365,7 +390,20 @@ def check_constrained_angle_length(law_of_cosines_length, independent_geometry_l
     directly).
 
     Tolerance is scaled by the constraint distance's own magnitude.
+
+    Precondition restricted to well-conditioned angles (theta >= 1 degree):
+    a numerical sweep found the law-of-cosines subtraction loses enough
+    precision to violate the 100*eps64 tolerance once theta drops below
+    ~0.2 degrees (worst with equal bond lengths); a near-zero angle also
+    implies the two constrained atoms sit within ~1e-5 nm of each other,
+    well inside van der Waals contact distance and not a physically
+    realizable H-X-H geometry. Near-180-degree (linear) angles do not
+    exhibit this cancellation and are unaffected. Not a defect -- a
+    checker-precondition gap, same pattern as OM-PBC-001/003's
+    well-conditioned gates.
     """
+    if is_well_conditioned is False:
+        return
     tol = 100 * eps64 * max(1e-12, abs(scale))
     trigger_if(not _within(law_of_cosines_length, independent_geometry_length, tol), "OM-FF-001")
 

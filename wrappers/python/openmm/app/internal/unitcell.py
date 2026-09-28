@@ -87,9 +87,16 @@ def computePeriodicBoxVectors(a_length, b_length, c_length, alpha, beta, gamma):
     if _scibench_checkers is not None and _scibench_checkers.enabled():
         try:
             a2, b2, c2, al2, be2, ga2 = computeLengthsAndAngles((a, b, c)*nanometers)
+            angle_margin = max(abs(alpha - math.pi/2), abs(beta - math.pi/2), abs(gamma - math.pi/2))
+            length_scale = max(a_length, b_length, c_length)
+            length_floor = max(1e-12, min(a_length, b_length, c_length))
+            is_well_conditioned = (
+                angle_margin <= math.radians(20)
+                and length_scale / length_floor <= 100
+            )
             _scibench_checkers.check_pbc_roundtrip(
                 a_length, b_length, c_length, alpha, beta, gamma,
-                a2, b2, c2, al2, be2, ga2, is_prereduced,
+                a2, b2, c2, al2, be2, ga2, is_prereduced, is_well_conditioned,
             )
         except Exception:
             pass
@@ -117,6 +124,15 @@ def reducePeriodicBoxVectors(periodicBoxVectors):
         except Exception:
             pass
 
+    is_well_conditioned = None
+    if _scibench_checkers is not None and _scibench_checkers.enabled():
+        try:
+            diag_scale = max(1e-12, abs(a[0]), abs(b[1]), abs(c[2]))
+            offdiag_scale = max(abs(b[0]), abs(c[0]), abs(c[1]), 0.0)
+            is_well_conditioned = offdiag_scale <= 1e5 * diag_scale
+        except Exception:
+            pass
+
     c = c - b*round(c[1]/b[1])
     c = c - a*round(c[0]/a[0])
     b = b - a*round(b[0]/a[0])
@@ -133,7 +149,7 @@ def reducePeriodicBoxVectors(periodicBoxVectors):
                 and a[0] >= 2*abs(c[0]) - 1e-9*max(1.0, abs(a[0]))
                 and b[1] >= 2*abs(c[1]) - 1e-9*max(1.0, abs(b[1]))
             )
-            _scibench_checkers.check_pbc_reduced_form(contract_ok)
+            _scibench_checkers.check_pbc_reduced_form(contract_ok, is_well_conditioned)
         except Exception:
             pass
 

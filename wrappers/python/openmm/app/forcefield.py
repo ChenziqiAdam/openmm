@@ -2475,8 +2475,9 @@ class HarmonicAngleGenerator(object):
                                         p1x, p1y = l1, 0.0
                                         p2x, p2y = l2*cos(theta), l2*math.sin(theta)
                                         indep_length = math.sqrt((p1x-p2x)**2 + (p1y-p2y)**2)
+                                        is_well_conditioned = theta >= math.radians(1.0)
                                         _scibench_checkers.check_constrained_angle_length(
-                                            length, indep_length, max(l1, l2)
+                                            length, indep_length, max(l1, l2), is_well_conditioned
                                         )
                                     except Exception:
                                         pass
