@@ -27,6 +27,8 @@
  * USE OR OTHER DEALINGS IN THE SOFTWARE.                                     *
  * -------------------------------------------------------------------------- */
 
+#include "openmm/internal/Sanitizer.h"
+#include <set>
 #include "openmm/NoseHooverIntegrator.h"
 #include "openmm/Context.h"
 #include "openmm/Force.h"
@@ -189,6 +191,40 @@ void NoseHooverIntegrator::initializeThermostats(const System &system) {
             noseHooverChains[largest].setNumDegreesOfFreedom(noseHooverChains[largest].getNumDegreesOfFreedom()-3);
             break;
         }
+    }
+
+    if (sanitizer::enabled() && noseHooverChains.size() > 0) {
+        // Independent count: three degrees of freedom per massive thermostated particle, minus one per constraint between two
+        // massive thermostated particles, minus three for center-of-mass removal.  Defined for chains of single particles
+        // that do not overlap.
+        std::set<int> seen;
+        bool simple = true;
+        int expected = 0, actual = 0;
+        for (auto& chain : noseHooverChains) {
+            if (chain.getThermostatedPairs().size() > 0)
+                simple = false;
+            actual += chain.getNumDegreesOfFreedom();
+            for (int p : chain.getThermostatedAtoms()) {
+                if (!seen.insert(p).second)
+                    simple = false;
+                if (system.getParticleMass(p) > 0)
+                    expected += 3;
+            }
+        }
+        for (int i = 0; i < system.getNumConstraints(); i++) {
+            int p1, p2;
+            double d;
+            system.getConstraintParameters(i, p1, p2, d);
+            if (seen.count(p1) && seen.count(p2) && system.getParticleMass(p1) > 0 && system.getParticleMass(p2) > 0)
+                expected -= 1;
+        }
+        for (int f = 0; f < system.getNumForces(); f++)
+            if (dynamic_cast<const CMMotionRemover*>(&system.getForce(f))) {
+                expected -= 3;
+                break;
+            }
+        if (simple && actual != expected)
+            sanitizer::alarm("DOF-001", "degrees_of_freedom", "thermostat DOF " + sanitizer::num(actual, expected));
     }
 
     for (int chain1 = 0; chain1 < noseHooverChains.size(); ++chain1){

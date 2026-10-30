@@ -38,6 +38,7 @@
 #include "openmm/internal/SplineFitter.h"
 
 #include <cmath>
+#include "openmm/internal/Sanitizer.h"
 
 #ifdef _MSC_VER
 #if _MSC_VER < 1800
@@ -59,6 +60,43 @@ static double wrap(double t, double min, double max) {
 using namespace OpenMM;
 using namespace std;
 using Lepton::CustomFunction;
+
+
+// A tabulated function interpolates its data: evaluating it at a grid node returns the stored value.  For a periodic
+// dimension the last node is identified with the first and is not checked.
+static void checkNodes(const char* what, const Lepton::CustomFunction& f, const std::vector<double>& values, const std::vector<std::vector<double> >& nodes, bool periodic) {
+    if (!OpenMM::sanitizer::enabled() || values.size() > 100000)
+        return;
+    double scale = 0;
+    for (double v : values)
+        scale = std::max(scale, fabs(v));
+    int dims = nodes.size();
+    std::vector<int> n(dims), idx(dims, 0);
+    size_t total = 1;
+    for (int d = 0; d < dims; d++) {
+        n[d] = nodes[d].size() - (periodic ? 1 : 0);
+        total *= n[d];
+    }
+    for (size_t count = 0; count < total; count++) {
+        double args[3];
+        size_t flat = 0, stride = 1;
+        for (int d = 0; d < dims; d++) {
+            args[d] = nodes[d][idx[d]];
+            flat += idx[d]*stride;
+            stride *= nodes[d].size();
+        }
+        double got = f.evaluate(args), want = values[flat];
+        if (fabs(got-want) > 1e3*OpenMM::sanitizer::EPS*(scale+1e-300)) {
+            OpenMM::sanitizer::alarm("TAB-001", "interpolation_at_nodes", std::string(what) + " node value " + OpenMM::sanitizer::num(got, want));
+            return;
+        }
+        for (int d = 0; d < dims; d++) {
+            if (++idx[d] < n[d])
+                break;
+            idx[d] = 0;
+        }
+    }
+}
 
 extern "C" OPENMM_EXPORT CustomFunction* createReferenceTabulatedFunction(const TabulatedFunction& function) {
     CustomFunction* fn;
@@ -87,6 +125,7 @@ ReferenceContinuous1DFunction::ReferenceContinuous1DFunction(const Continuous1DF
     for (int i = 0; i < numValues; i++)
         x[i] = min+i*(max-min)/(numValues-1);
     SplineFitter::createSpline(x, values, periodic, derivs);
+    checkNodes("1D", *this, values, std::vector<std::vector<double> >(1, x), periodic);
 }
 
 ReferenceContinuous1DFunction::ReferenceContinuous1DFunction(const ReferenceContinuous1DFunction& other) : function(other.function) {
@@ -129,6 +168,10 @@ ReferenceContinuous2DFunction::ReferenceContinuous2DFunction(const Continuous2DF
     for (int i = 0; i < ysize; i++)
         y[i] = ymin+i*(ymax-ymin)/(ysize-1);
     SplineFitter::create2DSpline(x, y, values, periodic, c);
+    {
+        std::vector<std::vector<double> > nodes; nodes.push_back(x); nodes.push_back(y);
+        checkNodes("2D", *this, values, nodes, periodic);
+    }
 }
 
 ReferenceContinuous2DFunction::ReferenceContinuous2DFunction(const ReferenceContinuous2DFunction& other) : function(other.function) {
@@ -187,6 +230,10 @@ ReferenceContinuous3DFunction::ReferenceContinuous3DFunction(const Continuous3DF
     for (int i = 0; i < zsize; i++)
         z[i] = zmin+i*(zmax-zmin)/(zsize-1);
     SplineFitter::create3DSpline(x, y, z, values, periodic, c);
+    {
+        std::vector<std::vector<double> > nodes; nodes.push_back(x); nodes.push_back(y); nodes.push_back(z);
+        checkNodes("3D", *this, values, nodes, periodic);
+    }
 }
 
 ReferenceContinuous3DFunction::ReferenceContinuous3DFunction(const ReferenceContinuous3DFunction& other) : function(other.function) {

@@ -27,6 +27,7 @@
  * USE OR OTHER DEALINGS IN THE SOFTWARE.                                     *
  * -------------------------------------------------------------------------- */
 
+#include "openmm/internal/Sanitizer.h"
 #include "ReferenceConstantPotential.h"
 #include "ReferenceForce.h"
 #include "SimTKOpenMMUtilities.h"
@@ -523,6 +524,40 @@ ReferenceConstantPotential::ReferenceConstantPotential(
 }
 
 
+// After a charge solve: the electrode charges sum to the requested total when the charge constraint is on, and for the
+// iterative solver the charge gradient (potential mismatch, projected onto the constraint plane) is within its tolerance.
+void ReferenceConstantPotential::sanitizeSolution(int numParticles, int numElectrodeParticles, const std::vector<Vec3>& posData,
+        std::vector<double>& charges, const std::vector<std::set<int>>& exclusions, const std::vector<int>& sysToElec, const std::vector<int>& elecToSys,
+        const std::vector<std::array<double, 3> >& electrodeParamArray, ReferencePME& pme, ReferenceConstantPotentialSolver* solver) {
+    if (!sanitizer::enabled() || numElectrodeParticles == 0)
+        return;
+    if (useChargeConstraint) {
+        double total = 0, scale = 0;
+        for (int ii = 0; ii < numElectrodeParticles; ii++) {
+            total += charges[elecToSys[ii]];
+            scale += fabs(charges[elecToSys[ii]]);
+        }
+        if (fabs(total-chargeTarget) > 1e3*sanitizer::EPS*(scale+fabs(chargeTarget)) + 1e-12)
+            sanitizer::alarm("CP-001", "constant_potential_charge", "electrode charge " + sanitizer::num(total, chargeTarget));
+    }
+    if (dynamic_cast<ReferenceConstantPotentialCGSolver*>(solver) != NULL) {
+        std::vector<double> chargesCopy = charges, grad(numElectrodeParticles);
+        getDerivatives(numParticles, numElectrodeParticles, posData, chargesCopy, exclusions, sysToElec, elecToSys, electrodeParamArray, grad, pme);
+        double offset = 0;
+        if (useChargeConstraint) {
+            for (int ii = 0; ii < numElectrodeParticles; ii++)
+                offset += grad[ii];
+            offset /= numElectrodeParticles;
+        }
+        double error = 0;
+        for (int ii = 0; ii < numElectrodeParticles; ii++)
+            error += (grad[ii]-offset)*(grad[ii]-offset);
+        double target = cgErrorTol*cgErrorTol*numElectrodeParticles;
+        if (error > 4*target)
+            sanitizer::alarm("CP-002", "constant_potential_convergence", "residual " + sanitizer::num(error, target));
+    }
+}
+
 void ReferenceConstantPotential::execute(
     int numParticles,
     int numElectrodeParticles,
@@ -538,6 +573,7 @@ void ReferenceConstantPotential::execute(
 ) {
     ReferencePME pme(ewaldAlpha, numParticles, gridSize, 5, 1);
     solver->solve(numParticles, numElectrodeParticles, posData, charges, exclusions, sysToElec, elecToSys, electrodeParamArray, *this, pme);
+    sanitizeSolution(numParticles, numElectrodeParticles, posData, charges, exclusions, sysToElec, elecToSys, electrodeParamArray, pme, solver);
     getEnergyForces(numParticles, numElectrodeParticles, posData, forceData, charges, exclusions, sysToElec, elecToSys, electrodeParamArray, energy, pme);
 }
 
@@ -554,6 +590,7 @@ void ReferenceConstantPotential::getCharges(
 ) {
     ReferencePME pme(ewaldAlpha, numParticles, gridSize, 5, 1);
     solver->solve(numParticles, numElectrodeParticles, posData, charges, exclusions, sysToElec, elecToSys, electrodeParamArray, *this, pme);
+    sanitizeSolution(numParticles, numElectrodeParticles, posData, charges, exclusions, sysToElec, elecToSys, electrodeParamArray, pme, solver);
 }
 
 void ReferenceConstantPotential::getEnergyForces(

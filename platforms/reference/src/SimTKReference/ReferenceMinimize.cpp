@@ -29,6 +29,7 @@
 
 #include "ReferenceMinimize.h"
 #include "lbfgs.h"
+#include "openmm/internal/Sanitizer.h"
 #include <cmath>
 
 using namespace OpenMM;
@@ -38,7 +39,9 @@ struct MinimizerData {
     ContextImpl& context;
     double k;
     MinimizationReporter* reporter;
-    MinimizerData(ContextImpl& context, double k, MinimizationReporter* reporter) : context(context), k(k), reporter(reporter) {
+    double firstEnergy;
+    bool haveFirst;
+    MinimizerData(ContextImpl& context, double k, MinimizationReporter* reporter) : context(context), k(k), reporter(reporter), firstEnergy(0), haveFirst(false) {
     }
 };
 
@@ -76,6 +79,10 @@ static lbfgsfloatval_t evaluate(void *instance, const lbfgsfloatval_t *x, lbfgsf
     for (int i = 0; i < numParticles; i++)
         positions[i] = Vec3(x[3*i], x[3*i+1], x[3*i+2]);
     double energy = computeForcesAndEnergy(context, positions, g);
+    if (!data->haveFirst) {
+        data->haveFirst = true;
+        data->firstEnergy = energy;
+    }
 
     // Add harmonic forces for any constraints.
 
@@ -197,6 +204,11 @@ void ReferenceMinimize::minimize(ContextImpl& context, double tolerance, int max
             lbfgsfloatval_t fx;
             lbfgs_progress_t reportFn = (reporter == NULL ? NULL : report);
             lbfgs(numParticles*3, x, &fx, evaluate, reportFn, &data, &param);
+
+            // Without constraint restraints the objective is the potential energy, and a line-search minimizer never increases it.
+            if (sanitizer::enabled() && system.getNumConstraints() == 0 && data.haveFirst &&
+                    fx > data.firstEnergy + 64*sanitizer::EPS*(fabs(fx)+fabs(data.firstEnergy)) + 1e-300)
+                sanitizer::alarm("MIN-001", "minimizer_monotone", "energy rose " + sanitizer::num(data.firstEnergy, fx));
 
             // Check whether all constraints are satisfied.
 

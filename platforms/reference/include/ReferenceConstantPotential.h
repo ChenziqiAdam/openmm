@@ -342,6 +342,14 @@ private:
         const std::vector<int>& sysToElec, const std::vector<int>& elecToSys,
         const std::vector<std::array<double, 3> >& electrodeParamArray,
         std::vector<double>& chargeDerivatives, ReferencePME& pme);
+
+    /** Observation-only checks on the charges produced by a solve. */
+    void sanitizeSolution(int numParticles, int numElectrodeParticles,
+        const std::vector<Vec3>& posData, std::vector<double>& charges,
+        const std::vector<std::set<int>>& exclusions,
+        const std::vector<int>& sysToElec, const std::vector<int>& elecToSys,
+        const std::vector<std::array<double, 3> >& electrodeParamArray,
+        ReferencePME& pme, ReferenceConstantPotentialSolver* solver);
 };
 
 } // namespace OpenMM

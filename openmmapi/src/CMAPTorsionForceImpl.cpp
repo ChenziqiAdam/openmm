@@ -30,6 +30,7 @@
 #ifdef WIN32
   #define _USE_MATH_DEFINES // Needed to get M_PI
 #endif
+#include "openmm/internal/Sanitizer.h"
 #include "openmm/internal/ContextImpl.h"
 #include "openmm/internal/CMAPTorsionForceImpl.h"
 #include "openmm/internal/SplineFitter.h"
@@ -170,6 +171,33 @@ void CMAPTorsionForceImpl::calcMapDerivatives(int size, const vector<double>& en
                 coeff[k] = sum;
             }
         }
+    }
+    if (sanitizer::enabled() && size > 1) {
+        // Each bicubic patch (i,j) is a polynomial in the fractional coordinates (da,db) of its cell, c[a*4+b]*da^a*db^b.  The
+        // interpolated surface reproduces the map at the nodes and is continuous across patch edges, including the wrap-around.
+        auto patch = [&](int i, int j, double da, double db) {
+            const vector<double>& k = c[((i+size)%size)+((j+size)%size)*size];
+            double e = 0;
+            for (int a = 3; a >= 0; a--)
+                e = da*e + ((k[a*4+3]*db + k[a*4+2])*db + k[a*4+1])*db + k[a*4+0];
+            return e;
+        };
+        double scale = 0;
+        for (double v : energy)
+            scale = max(scale, fabs(v));
+        double tol = 1e-9*scale + 1e-300;
+        for (int i = 0; i < size; i++)
+            for (int j = 0; j < size; j++) {
+                double node = energy[i+j*size];
+                bool bad = fabs(patch(i, j, 0, 0)-node) > tol || fabs(patch(i-1, j, 1, 0)-node) > tol || fabs(patch(i, j-1, 0, 1)-node) > tol
+                        || fabs(patch(i-1, j-1, 1, 1)-node) > tol;
+                for (double t : {0.3, 0.7})
+                    bad = bad || fabs(patch(i-1, j, 1, t)-patch(i, j, 0, t)) > tol || fabs(patch(i, j-1, t, 1)-patch(i, j, t, 0)) > tol;
+                if (bad) {
+                    sanitizer::alarm("CMAP-001", "cmap_surface_continuity", "patch (" + sanitizer::num(i) + "," + sanitizer::num(j) + ") inconsistent");
+                    return;
+                }
+            }
     }
 }
 

@@ -22,6 +22,7 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include "openmm/internal/Sanitizer.h"
 #include <string.h>
 #include <stdlib.h>
 #include <sstream>
@@ -206,6 +207,9 @@ void ReferenceObc::computeBornRadii(const vector<Vec3>& atomCoordinates, vector<
        double tanhSum    = tanh(alphaObc*sum - betaObc*sum2 + gammaObc*sum3);
        
        bornRadii[atomI]      = 1.0/(1.0/offsetRadiusI - tanhSum/radiusI); 
+       // Descreening by neighbors can only push the effective Born radius outward from the offset intrinsic radius.
+       if (sanitizer::enabled() && !(bornRadii[atomI] >= offsetRadiusI*(1-64*sanitizer::EPS) && std::isfinite(bornRadii[atomI])))
+           sanitizer::alarm("GB-001", "born_radius_bound", "Born radius " + sanitizer::num(bornRadii[atomI], offsetRadiusI));
  
        obcChain[atomI]       = offsetRadiusI*(alphaObc - 2.0*betaObc*sum + 3.0*gammaObc*sum2);
        obcChain[atomI]       = (1.0 - tanhSum*tanhSum)*obcChain[atomI]/radiusI;
