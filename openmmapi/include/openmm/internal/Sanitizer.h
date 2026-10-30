@@ -204,10 +204,12 @@ public:
         for (size_t i = 0; i < n; i++) {
             Vec3 d = after[i]-before[i];
             sum += d;
-            fscale += norm(d);
+            // The delta is formed by subtracting two accumulated arrays, so rounding scales with their magnitudes.
+            double mag = norm(d) + norm(before[i]) + norm(after[i]);
+            fscale += mag;
             if (torque) {
                 tq += pos[i].cross(d);
-                tscale += norm(pos[i])*norm(d);
+                tscale += norm(pos[i])*mag;
             }
         }
         // Each pairwise/bonded term cancels exactly up to rounding; slack grows with the particle count and the force scale.

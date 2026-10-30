@@ -295,7 +295,7 @@ static void sanitizeDispersion(const System& system, const NonbondedForce& force
     if (!sanitizer::enabled() || n > 100 || n == 0)
         return;
     // Independent route: composite Simpson quadrature of the Lennard-Jones tail over every particle pair (including
-    // self pairs), in the variable u = 1/r where the unswitched integrand is a polynomial.
+    // self pairs; the switched region adds back the part of the potential the switch removed), in the variable u = 1/r where the unswitched integrand is a polynomial.
     double rc = force.getCutoffDistance(), rsw = force.getSwitchingDistance();
     bool useSwitch = force.getUseSwitchingFunction();
     const int steps = 512;
@@ -319,7 +319,7 @@ static void sanitizeDispersion(const System& system, const NonbondedForce& force
                     double t = (r-rsw)/(rc-rsw);
                     double S = 1+t*t*t*(-10+t*(15-t*6));
                     double ur = 4*eps*(pow(sig/r, 12)-pow(sig/r, 6));
-                    sw += (S-1)*ur*4*M_PI*r*r*(q == 0 || q == steps ? 1 : (q%2 ? 4 : 2));
+                    sw += (1-S)*ur*4*M_PI*r*r*(q == 0 || q == steps ? 1 : (q%2 ? 4 : 2));
                 }
                 tail += sw*hr/3;
             }

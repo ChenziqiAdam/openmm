@@ -237,19 +237,22 @@ void ReferenceConstraints::applyToVelocities(vector<OpenMM::Vec3>& atomCoordinat
     if (!sanitizer::enabled())
         return;
 
-    // After projection no constrained pair moves along its bond.
+    // After projection no constrained pair moves along its bond.  The projection stops when
+    // |dv.e| <= tolerance*d*(1/m1+1/m2) for every constraint (its stated tolerance in velocity mode); allow twice that
+    // plus the rounding of the velocities.
     double vmax = 0;
     for (size_t i = 0; i < velocities.size(); i++)
         vmax = max(vmax, sanitizer::norm(velocities[i]));
-    double worst = 0;
+    double worstRatio = 0;
     for (size_t i = 0; i < sanAtom1.size(); i++) {
         Vec3 e = atomCoordinates[sanAtom1[i]]-atomCoordinates[sanAtom2[i]];
         double len = sanitizer::norm(e);
         if (len == 0)
             continue;
         Vec3 dv = velocities[sanAtom1[i]]-velocities[sanAtom2[i]];
-        worst = max(worst, fabs(dv.dot(e))/len);
+        double allowed = 2*tolerance*len*(inverseMasses[sanAtom1[i]]+inverseMasses[sanAtom2[i]]) + 1e3*sanitizer::EPS*vmax;
+        worstRatio = max(worstRatio, fabs(dv.dot(e))/len/allowed);
     }
-    if (worst > 2*tolerance*vmax + 1e3*sanitizer::EPS*vmax)
-        sanitizer::alarm("CON-002", "constraint_postcondition", "relative speed along bond " + sanitizer::num(worst, vmax));
+    if (worstRatio > 1)
+        sanitizer::alarm("CON-002", "constraint_postcondition", "residual bond-parallel speed over allowance " + sanitizer::num(worstRatio));
 }
