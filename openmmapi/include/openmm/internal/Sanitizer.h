@@ -39,7 +39,8 @@ inline void alarm(const char* id, const char* family, const std::string& detail)
     FILE* f = std::fopen(logPath(), "a");
     if (f == NULL)
         return;
-    std::fprintf(f, "{\"id\":\"%s\",\"family\":\"%s\",\"detail\":\"%s\"}\n", id, family, detail.c_str());
+    const char* key = std::getenv("OPENMM_SANITIZE_KEY");
+    std::fprintf(f, "{\"id\":\"%s\",\"family\":\"%s\",\"key\":\"%s\",\"detail\":\"%s\"}\n", id, family, key == NULL ? "" : key, detail.c_str());
     std::fclose(f);
 }
 

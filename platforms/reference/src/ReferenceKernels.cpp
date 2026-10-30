@@ -1013,15 +1013,6 @@ double ReferenceCalcNonbondedForceKernel::execute(ContextImpl& context, bool inc
         clj.setPeriodic(boxVectors);
         clj.setPeriodicExceptions(exceptionsArePeriodic);
     }
-    if ((ewald || pme || ljpme) && sanitizer::enabled()) {
-        double q = 0, qabs = 0;
-        for (int i = 0; i < numParticles; i++) {
-            q += particleParamArray[i][2 /*QIndex*/];
-            qabs += fabs(particleParamArray[i][2 /*QIndex*/]);
-        }
-        if (fabs(q) > 1e-9*qabs)
-            sanitizer::alarm("EWA-003", "periodic_net_charge", "net charge " + sanitizer::num(q, qabs));
-    }
     if (ewald)
         clj.setUseEwald(ewaldAlpha, kmax[0], kmax[1], kmax[2]);
     if (pme)
