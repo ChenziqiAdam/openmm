@@ -391,7 +391,9 @@ void ReferenceLJCoulombIxn::calculateEwaldIxn(int numberOfAtoms, vector<Vec3>& a
             double t = (r-switchingDistance)/(cutoffDistance-switchingDistance);
             switchValue = 1+t*t*t*(-10+t*(15-t*6));
             switchDeriv = t*t*(-30+t*(60-t*30))/(cutoffDistance-switchingDistance);
-            sanitizer::checkSwitch(switchValue, switchDeriv, cutoffDistance, switchingDistance);
+            // The neighbor list and the minimum image agree on which images lie within the cutoff only if the box is at least twice the cutoff.
+            if (periodicBoxVectors[0][0] >= 2.0*cutoffDistance && periodicBoxVectors[1][1] >= 2.0*cutoffDistance && periodicBoxVectors[2][2] >= 2.0*cutoffDistance)
+                sanitizer::checkSwitch(switchValue, switchDeriv, cutoffDistance, switchingDistance);
         }
         double alphaR = alphaEwald * r;
 
@@ -609,7 +611,9 @@ void ReferenceLJCoulombIxn::calculateOneIxn(int ii, int jj, vector<Vec3>& atomCo
             double t = (r-switchingDistance)/(cutoffDistance-switchingDistance);
             switchValue = 1+t*t*t*(-10+t*(15-t*6));
             switchDeriv = t*t*(-30+t*(60-t*30))/(cutoffDistance-switchingDistance);
-            sanitizer::checkSwitch(switchValue, switchDeriv, cutoffDistance, switchingDistance);
+            // Valid only if the box is at least twice the cutoff (see the neighbor-list path above).
+            if (!periodic || (periodicBoxVectors[0][0] >= 2.0*cutoffDistance && periodicBoxVectors[1][1] >= 2.0*cutoffDistance && periodicBoxVectors[2][2] >= 2.0*cutoffDistance))
+                sanitizer::checkSwitch(switchValue, switchDeriv, cutoffDistance, switchingDistance);
         }
     }
     double sig = atomParameters[ii][SigIndex] +  atomParameters[jj][SigIndex];

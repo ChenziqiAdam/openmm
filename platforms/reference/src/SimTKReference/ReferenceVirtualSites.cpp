@@ -289,6 +289,17 @@ void ReferenceVirtualSites::distributeForces(const OpenMM::System& system, const
                     weightSum = 0.0;
                     for (double w : originWeights)
                         weightSum += w;
+                    // The direction vectors are translation invariant only if their weights sum to zero (the API accepts a sum up to 1e-6).
+                    std::vector<double> xWeights, yWeights;
+                    local->getXWeights(xWeights);
+                    local->getYWeights(yWeights);
+                    double xSum = 0.0, ySum = 0.0;
+                    for (double w : xWeights)
+                        xSum += w;
+                    for (double w : yWeights)
+                        ySum += w;
+                    if (fabs(xSum) > 1e-12 || fabs(ySum) > 1e-12)
+                        unitWeights = false;
                 }
                 if (fabs(weightSum-1.0) > 1e-12)
                     unitWeights = false;

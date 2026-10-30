@@ -76,6 +76,12 @@ static void checkNodes(const char* what, const Lepton::CustomFunction& f, const 
     double scale = 0;
     for (double v : values)
         scale = std::max(scale, fabs(v));
+    // A node position is rounded when recomputed, which shifts the value by that rounding times the local slope of the data.
+    double slope = 0;
+    for (size_t d = 0; d < limits.size(); d++) {
+        double xmax = std::max(fabs(limits[d][0]), fabs(limits[d][1])), spacing = (limits[d][1]-limits[d][0])/(limits[d][2]-1);
+        slope = std::max(slope, 2*scale*xmax/spacing);
+    }
     int dims = nodes.size();
     std::vector<int> n(dims), idx(dims, 0);
     size_t total = 1;
@@ -101,7 +107,7 @@ static void checkNodes(const char* what, const Lepton::CustomFunction& f, const 
             // That is a separate edge of the domain, not the interpolation law; skip the node.
             evaluated = false;
         }
-        if (evaluated && fabs(got-want) > 1e3*OpenMM::sanitizer::EPS*(scale+1e-300)) {
+        if (evaluated && fabs(got-want) > 1e3*OpenMM::sanitizer::EPS*(scale+slope+1e-300)) {
             OpenMM::sanitizer::alarm("TAB-001", "interpolation_at_nodes", std::string(what) + " node value " + OpenMM::sanitizer::num(got, want));
             return;
         }
