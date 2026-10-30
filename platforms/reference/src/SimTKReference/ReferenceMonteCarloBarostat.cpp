@@ -27,6 +27,7 @@
 
 #include "SimTKOpenMMUtilities.h"
 #include "ReferenceMonteCarloBarostat.h"
+#include "openmm/internal/Sanitizer.h"
 
 using namespace std;
 using namespace OpenMM;
@@ -108,6 +109,27 @@ void ReferenceMonteCarloBarostat::applyBarostat(vector<Vec3>& atomPositions, con
         for (int atom : molecule) {
             Vec3& atomPos = atomPositions[atom];
             atomPos += offset;
+        }
+    }
+    if (sanitizer::enabled()) {
+        // A rigid translation of each molecule leaves all of its internal distances unchanged.
+        double scale = 0;
+        for (int i = 0; i < (int) atomPositions.size(); i++)
+            scale = max(scale, sanitizer::norm(atomPositions[i]));
+        for (auto& molecule : molecules) {
+            if (molecule.size() > 200)
+                continue;
+            for (size_t a = 0; a < molecule.size(); a++)
+                for (size_t b = a+1; b < molecule.size(); b++) {
+                    Vec3 before(savedAtomPositions[0][molecule[a]]-savedAtomPositions[0][molecule[b]],
+                                savedAtomPositions[1][molecule[a]]-savedAtomPositions[1][molecule[b]],
+                                savedAtomPositions[2][molecule[a]]-savedAtomPositions[2][molecule[b]]);
+                    Vec3 after = atomPositions[molecule[a]]-atomPositions[molecule[b]];
+                    if (fabs(sanitizer::norm(after)-sanitizer::norm(before)) > 256*sanitizer::EPS*(scale+sanitizer::norm(before))) {
+                        sanitizer::alarm("BARO-001", "barostat_geometry", "intramolecular distance " + sanitizer::num(sanitizer::norm(after), sanitizer::norm(before)));
+                        return;
+                    }
+                }
         }
     }
 }

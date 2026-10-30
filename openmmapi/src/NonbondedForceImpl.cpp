@@ -30,6 +30,7 @@
 #ifdef WIN32
   #define _USE_MATH_DEFINES // Needed to get M_PI
 #endif
+#include "openmm/internal/Sanitizer.h"
 #include "openmm/OpenMMException.h"
 #include "openmm/internal/ContextImpl.h"
 #include "openmm/internal/Messages.h"
@@ -181,6 +182,20 @@ void NonbondedForceImpl::calcEwaldParameters(const System& system, const Nonbond
     kmaxx = findZero(EwaldErrorFunction(boxVectors[0][0], alpha, tol), 10);
     kmaxy = findZero(EwaldErrorFunction(boxVectors[1][1], alpha, tol), 10);
     kmaxz = findZero(EwaldErrorFunction(boxVectors[2][2], alpha, tol), 10);
+    if (sanitizer::enabled() && tol >= 1e-10 && tol <= 1e-1) {
+        double rc = force.getCutoffDistance();
+        if (erfc(alpha*rc) > tol)
+            sanitizer::alarm("EWA-001", "ewald_real_space_error", "erfc(alpha rc) " + sanitizer::num(erfc(alpha*rc), tol));
+        // Gaussian decay of the reciprocal-space sum at the last included wave vector (Kolafa-Perram bound, within a factor 100).
+        int kmax[3] = {kmaxx, kmaxy, kmaxz};
+        for (int d = 0; d < 3; d++) {
+            double x = M_PI*kmax[d]/(alpha*boxVectors[d][d]);
+            if (exp(-x*x) > 100*tol) {
+                sanitizer::alarm("EWA-002", "ewald_reciprocal_resolution", "reciprocal decay " + sanitizer::num(exp(-x*x), tol));
+                break;
+            }
+        }
+    }
     if (kmaxx%2 == 0)
         kmaxx++;
     if (kmaxy%2 == 0)
@@ -212,6 +227,16 @@ void NonbondedForceImpl::calcPMEParameters(const System& system, const Nonbonded
         xsize = max(xsize, 6);
         ysize = max(ysize, 6);
         zsize = max(zsize, 6);
+    }
+    if (sanitizer::enabled() && !lj && force.getEwaldErrorTolerance() >= 1e-10 && force.getEwaldErrorTolerance() <= 1e-1 && force.getCutoffDistance() > 0) {
+        double rc = force.getCutoffDistance();
+        double tolPME = force.getEwaldErrorTolerance();
+        double autoAlpha = (1.0/rc)*std::sqrt(-log(2.0*tolPME));
+        double a0;
+        int n0, n1, n2;
+        force.getPMEParameters(a0, n0, n1, n2);
+        if (a0 == 0.0 && erfc(autoAlpha*rc) > tolPME)
+            sanitizer::alarm("EWA-001", "ewald_real_space_error", "erfc(alpha rc) " + sanitizer::num(erfc(autoAlpha*rc), tolPME));
     }
 }
 
@@ -263,6 +288,48 @@ double NonbondedForceImpl::evalIntegral(double r, double rs, double rc, double s
      + r*15*(2*rs*A2 + A)
      - r2*3*A2
     );
+}
+
+static void sanitizeDispersion(const System& system, const NonbondedForce& force, const vector<double>& sigma, const vector<double>& epsilon, double result) {
+    int n = system.getNumParticles();
+    if (!sanitizer::enabled() || n > 100 || n == 0)
+        return;
+    // Independent route: composite Simpson quadrature of the Lennard-Jones tail over every particle pair (including
+    // self pairs), in the variable u = 1/r where the unswitched integrand is a polynomial.
+    double rc = force.getCutoffDistance(), rsw = force.getSwitchingDistance();
+    bool useSwitch = force.getUseSwitchingFunction();
+    const int steps = 512;
+    double total = 0, magnitude = 0;
+    for (int i = 0; i < n; i++)
+        for (int j = i; j < n; j++) {
+            double sig = 0.5*(sigma[i]+sigma[j]), eps = sqrt(epsilon[i]*epsilon[j]);
+            double s6 = pow(sig, 6);
+            double h = 1.0/(rc*steps);
+            double sum = 0;
+            for (int q = 0; q <= steps; q++) {
+                double u = q*h;
+                double f = 16*M_PI*eps*(s6*s6*pow(u, 8) - s6*u*u);
+                sum += f*(q == 0 || q == steps ? 1 : (q%2 ? 4 : 2));
+            }
+            double tail = sum*h/3;
+            if (useSwitch) {
+                double hr = (rc-rsw)/steps, sw = 0;
+                for (int q = 0; q <= steps; q++) {
+                    double r = rsw + q*hr;
+                    double t = (r-rsw)/(rc-rsw);
+                    double S = 1+t*t*t*(-10+t*(15-t*6));
+                    double ur = 4*eps*(pow(sig/r, 12)-pow(sig/r, 6));
+                    sw += (S-1)*ur*4*M_PI*r*r*(q == 0 || q == steps ? 1 : (q%2 ? 4 : 2));
+                }
+                tail += sw*hr/3;
+            }
+            total += tail;
+            magnitude += fabs(tail);
+        }
+    double numInteractions = n*(n+1)/2.0;
+    double expected = 0.5*n*n*total/numInteractions;
+    if (fabs(expected-result) > 1e-6*(0.5*n*n*magnitude/numInteractions) + 1e-300)
+        sanitizer::alarm("DISP-001", "dispersion_correction", "coefficient " + sanitizer::num(result, expected));
 }
 
 double NonbondedForceImpl::calcDispersionCorrection(const System& system, const NonbondedForce& force) {
@@ -338,7 +405,9 @@ double NonbondedForceImpl::calcDispersionCorrection(const System& system, const 
     sum1 /= numInteractions;
     sum2 /= numInteractions;
     sum3 /= numInteractions;
-    return 8*numParticles*numParticles*M_PI*(sum1/(9*pow(cutoff, 9))-sum2/(3*pow(cutoff, 3))+sum3);
+    double result = 8*numParticles*numParticles*M_PI*(sum1/(9*pow(cutoff, 9))-sum2/(3*pow(cutoff, 3))+sum3);
+    sanitizeDispersion(system, force, sigma, epsilon, result);
+    return result;
 }
 
 void NonbondedForceImpl::updateParametersInContext(ContextImpl& context, int firstParticle, int lastParticle, int firstException, int lastException) {

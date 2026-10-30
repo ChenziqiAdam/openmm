@@ -28,6 +28,7 @@
  * -------------------------------------------------------------------------- */
 
 #include "ReferenceKernels.h"
+#include "openmm/internal/Sanitizer.h"
 #include "ReferenceObc.h"
 #include "ReferenceAndersenThermostat.h"
 #include "ReferenceAngleBondIxn.h"
@@ -374,12 +375,14 @@ void ReferenceCalcHarmonicBondForceKernel::initialize(const System& system, cons
 double ReferenceCalcHarmonicBondForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
     vector<Vec3>& posData = extractPositions(context);
     vector<Vec3>& forceData = extractForces(context);
+    sanitizer::ForceBalance balance(forceData);
     double energy = 0;
     ReferenceBondForce refBondForce;
     ReferenceHarmonicBondIxn harmonicBond;
     if (usePeriodic)
         harmonicBond.setPeriodic(extractBoxVectors(context));
     refBondForce.calculateForce(numBonds, bondIndexArray, posData, bondParamArray, forceData, includeEnergy ? &energy : NULL, harmonicBond);
+    balance.check("BF-001", "BF-006", forceData, posData, !usePeriodic);
     return energy;
 }
 
@@ -505,12 +508,14 @@ void ReferenceCalcHarmonicAngleForceKernel::initialize(const System& system, con
 double ReferenceCalcHarmonicAngleForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
     vector<Vec3>& posData = extractPositions(context);
     vector<Vec3>& forceData = extractForces(context);
+    sanitizer::ForceBalance balance(forceData);
     double energy = 0;
     ReferenceBondForce refBondForce;
     ReferenceAngleBondIxn angleBond;
     if (usePeriodic)
         angleBond.setPeriodic(extractBoxVectors(context));
     refBondForce.calculateForce(numAngles, angleIndexArray, posData, angleParamArray, forceData, includeEnergy ? &energy : NULL, angleBond);
+    balance.check("BF-002", "BF-007", forceData, posData, !usePeriodic);
     return energy;
 }
 
@@ -637,12 +642,14 @@ void ReferenceCalcPeriodicTorsionForceKernel::initialize(const System& system, c
 double ReferenceCalcPeriodicTorsionForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
     vector<Vec3>& posData = extractPositions(context);
     vector<Vec3>& forceData = extractForces(context);
+    sanitizer::ForceBalance balance(forceData);
     double energy = 0;
     ReferenceBondForce refBondForce;
     ReferenceProperDihedralBond periodicTorsionBond;
     if (usePeriodic)
         periodicTorsionBond.setPeriodic(extractBoxVectors(context));
     refBondForce.calculateForce(numTorsions, torsionIndexArray, posData, torsionParamArray, forceData, includeEnergy ? &energy : NULL, periodicTorsionBond);
+    balance.check("BF-003", "BF-008", forceData, posData, !usePeriodic);
     return energy;
 }
 
@@ -689,12 +696,14 @@ void ReferenceCalcRBTorsionForceKernel::initialize(const System& system, const R
 double ReferenceCalcRBTorsionForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
     vector<Vec3>& posData = extractPositions(context);
     vector<Vec3>& forceData = extractForces(context);
+    sanitizer::ForceBalance balance(forceData);
     double energy = 0;
     ReferenceBondForce refBondForce;
     ReferenceRbDihedralBond rbTorsionBond;
     if (usePeriodic)
         rbTorsionBond.setPeriodic(extractBoxVectors(context));
     refBondForce.calculateForce(numTorsions, torsionIndexArray, posData, torsionParamArray, forceData, includeEnergy ? &energy : NULL, rbTorsionBond);
+    balance.check("BF-004", "BF-009", forceData, posData, !usePeriodic);
     return energy;
 }
 
@@ -749,11 +758,13 @@ void ReferenceCalcCMAPTorsionForceKernel::initialize(const System& system, const
 double ReferenceCalcCMAPTorsionForceKernel::execute(ContextImpl& context, bool includeForces, bool includeEnergy) {
     vector<Vec3>& posData = extractPositions(context);
     vector<Vec3>& forceData = extractForces(context);
+    sanitizer::ForceBalance balance(forceData);
     double totalEnergy = 0;
     ReferenceCMAPTorsionIxn torsion(coeff, torsionMaps, torsionIndices);
     if (usePeriodic)
         torsion.setPeriodic(extractBoxVectors(context));
     torsion.calculateIxn(posData, forceData, &totalEnergy);
+    balance.check("BF-005", "BF-010", forceData, posData, !usePeriodic);
     return totalEnergy;
 }
 
@@ -983,6 +994,7 @@ double ReferenceCalcNonbondedForceKernel::execute(ContextImpl& context, bool inc
     vector<Vec3>& posData = extractPositions(context);
     vector<Vec3>& forceData = extractForces(context);
     double energy = 0;
+    sanitizer::ForceBalance balance(forceData);
     ReferenceLJCoulombIxn clj;
     bool periodic = (nonbondedMethod == CutoffPeriodic);
     bool ewald  = (nonbondedMethod == Ewald);
@@ -991,6 +1003,7 @@ double ReferenceCalcNonbondedForceKernel::execute(ContextImpl& context, bool inc
     if (nonbondedMethod != NoCutoff) {
         computeNeighborListVoxelHash(*neighborList, numParticles, posData, exclusions, extractBoxVectors(context), periodic || ewald || pme || ljpme, nonbondedCutoff, 0.0);
         clj.setUseCutoff(nonbondedCutoff, *neighborList, rfDielectric);
+        sanitizer::checkNeighborCompleteness(numParticles, posData, extractBoxVectors(context), periodic || ewald || pme || ljpme, nonbondedCutoff, exclusions, *neighborList);
     }
     if (periodic || ewald || pme || ljpme) {
         Vec3* boxVectors = extractBoxVectors(context);
@@ -999,6 +1012,15 @@ double ReferenceCalcNonbondedForceKernel::execute(ContextImpl& context, bool inc
             throw OpenMMException("The periodic box size has decreased to less than twice the nonbonded cutoff.");
         clj.setPeriodic(boxVectors);
         clj.setPeriodicExceptions(exceptionsArePeriodic);
+    }
+    if ((ewald || pme || ljpme) && sanitizer::enabled()) {
+        double q = 0, qabs = 0;
+        for (int i = 0; i < numParticles; i++) {
+            q += particleParamArray[i][2 /*QIndex*/];
+            qabs += fabs(particleParamArray[i][2 /*QIndex*/]);
+        }
+        if (fabs(q) > 1e-9*qabs)
+            sanitizer::alarm("EWA-003", "periodic_net_charge", "net charge " + sanitizer::num(q, qabs));
     }
     if (ewald)
         clj.setUseEwald(ewaldAlpha, kmax[0], kmax[1], kmax[2]);
@@ -1024,6 +1046,8 @@ double ReferenceCalcNonbondedForceKernel::execute(ContextImpl& context, bool inc
             energy += dispersionCoefficient/(boxVectors[0][0]*boxVectors[1][1]*boxVectors[2][2]);
         }
     }
+    if (nonbondedMethod == NoCutoff || nonbondedMethod == CutoffNonPeriodic)
+        balance.check("NF-001", "NF-002", forceData, posData, true);
     return energy;
 }
 
@@ -2654,7 +2678,11 @@ void ReferenceIntegrateVerletStepKernel::execute(ContextImpl& context, const Ver
         dynamics->setVirtualSites(extractVirtualSites(context));
         prevStepSize = stepSize;
     }
+    vector<Vec3> posBefore;
+    if (sanitizer::enabled())
+        posBefore = posData;
     dynamics->update(context.getSystem(), posData, velData, forceData, masses, integrator.getConstraintTolerance(), extractBoxVectors(context));
+    sanitizer::checkMasslessFixed(context.getSystem(), posBefore, posData);
     data.time += stepSize;
     data.stepCount++;
 }
@@ -2962,7 +2990,11 @@ void ReferenceIntegrateLangevinMiddleStepKernel::execute(ContextImpl& context, c
         prevFriction = friction;
         prevStepSize = stepSize;
     }
+    vector<Vec3> posBefore;
+    if (sanitizer::enabled())
+        posBefore = posData;
     dynamics->update(context, posData, velData, masses, integrator.getConstraintTolerance(), extractBoxVectors(context));
+    sanitizer::checkMasslessFixed(context.getSystem(), posBefore, posData);
     data.time += stepSize;
     data.stepCount++;
 }
@@ -3370,7 +3402,7 @@ void ReferenceRemoveCMMotionKernel::execute(ContextImpl& context) {
             velData[i][1] -= momentum[1];
             velData[i][2] -= momentum[2];
         }
-    }
+    }    sanitizer::checkZeroMomentum(masses, velData);
 }
 
 void ReferenceCalcATMForceKernel::loadParams(int numParticles, const ATMForce& force) {

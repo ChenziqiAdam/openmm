@@ -27,6 +27,7 @@
  * USE OR OTHER DEALINGS IN THE SOFTWARE.                                     *
  * -------------------------------------------------------------------------- */
 
+#include "openmm/internal/Sanitizer.h"
 #include "openmm/internal/MonteCarloBarostatImpl.h"
 #include "openmm/internal/ContextImpl.h"
 #include "openmm/internal/OSRngSeed.h"
@@ -78,7 +79,23 @@ void MonteCarloBarostatImpl::updateContextState(ContextImpl& context, bool& forc
     double lengthScale = pow(newVolume/volume, 1.0/3.0);
     kernel.getAs<ApplyMonteCarloBarostatKernel>().saveCoordinates(context);
     context.getOwner().setPeriodicBoxVectors(box[0]*lengthScale, box[1]*lengthScale, box[2]*lengthScale);
+    vector<Vec3> sanBefore;
+    if (sanitizer::enabled())
+        context.getPositions(sanBefore);
     kernel.getAs<ApplyMonteCarloBarostatKernel>().scaleCoordinates(context, lengthScale, lengthScale, lengthScale);
+    if (sanitizer::enabled()) {
+        vector<Vec3> sanAfter;
+        context.getPositions(sanAfter);
+        vector<vector<int> > units;
+        if (owner.getScaleMoleculesAsRigid())
+            units = context.getMolecules();
+        else
+            for (int i = 0; i < context.getSystem().getNumParticles(); i++)
+                units.push_back(vector<int>(1, i));
+        Vec3 newBox[3];
+        context.getPeriodicBoxVectors(newBox[0], newBox[1], newBox[2]);
+        sanitizer::checkBarostatMove(newVolume, box, newBox, sanBefore, sanAfter, units);
+    }
 
     // Compute the energy of the modified system.
 

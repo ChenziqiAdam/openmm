@@ -27,6 +27,8 @@
  * USE OR OTHER DEALINGS IN THE SOFTWARE.                                     *
  * -------------------------------------------------------------------------- */
 
+#include "openmm/internal/Sanitizer.h"
+#include "openmm/HarmonicBondForce.h"
 #include "openmm/Force.h"
 #include "openmm/Integrator.h"
 #include "openmm/OpenMMException.h"
@@ -394,6 +396,50 @@ const vector<vector<int> >& ContextImpl::getMolecules() const {
     // Now identify particles by which molecule they belong to.
 
     molecules = findMolecules(numParticles, particleBonds);
+    if (sanitizer::enabled()) {
+        // Molecules partition the particles, and every constraint, virtual-site dependence and harmonic bond
+        // read directly from the System keeps its particles in one molecule.
+        vector<int> owner(numParticles, -1);
+        bool partition = true;
+        for (size_t m = 0; m < molecules.size(); m++)
+            for (int p : molecules[m]) {
+                if (p < 0 || p >= numParticles || owner[p] != -1)
+                    partition = false;
+                else
+                    owner[p] = m;
+            }
+        for (int p = 0; p < numParticles; p++)
+            if (owner[p] == -1)
+                partition = false;
+        bool joined = true;
+        if (partition) {
+            for (int i = 0; i < system.getNumConstraints(); i++) {
+                int p1, p2;
+                double d;
+                system.getConstraintParameters(i, p1, p2, d);
+                if (owner[p1] != owner[p2])
+                    joined = false;
+            }
+            for (int i = 0; i < numParticles; i++)
+                if (system.isVirtualSite(i))
+                    for (int j = 0; j < system.getVirtualSite(i).getNumParticles(); j++)
+                        if (owner[i] != owner[system.getVirtualSite(i).getParticle(j)])
+                            joined = false;
+            for (int f = 0; f < system.getNumForces(); f++) {
+                const HarmonicBondForce* bonds = dynamic_cast<const HarmonicBondForce*>(&system.getForce(f));
+                if (bonds != NULL)
+                    for (int i = 0; i < bonds->getNumBonds(); i++) {
+                        int p1, p2;
+                        double length, k;
+                        bonds->getBondParameters(i, p1, p2, length, k);
+                        if (owner[p1] != owner[p2])
+                            joined = false;
+                    }
+            }
+        }
+        if (!partition || !joined)
+            sanitizer::alarm("MOL-001", "molecule_partition", partition ? "bonded particles in different molecules" : "molecules do not partition the particles");
+    }
     return molecules;
 }
 

@@ -32,6 +32,7 @@
 
 #include "ReferenceConstraintAlgorithm.h"
 #include "openmm/System.h"
+#include <vector>
 
 namespace OpenMM {
 
@@ -64,6 +65,8 @@ public:
      * @param tolerance        the constraint tolerance
      */
     void applyToVelocities(std::vector<OpenMM::Vec3>& atomCoordinates, std::vector<OpenMM::Vec3>& velocities, std::vector<double>& inverseMasses, double tolerance);
+    std::vector<int> sanAtom1, sanAtom2;
+    std::vector<double> sanDistance;
     ReferenceConstraintAlgorithm* ccma;
     ReferenceConstraintAlgorithm* settle;
 };

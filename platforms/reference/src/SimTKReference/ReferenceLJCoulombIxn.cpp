@@ -22,6 +22,7 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include "openmm/internal/Sanitizer.h"
 #include <string.h>
 #include <sstream>
 #include <complex>
@@ -77,6 +78,7 @@ void ReferenceLJCoulombIxn::setUseCutoff(double distance, const OpenMM::Neighbor
     neighborList = &neighbors;
     krf = pow(cutoffDistance, -3.0)*(solventDielectric-1.0)/(2.0*solventDielectric+1.0);
     crf = (1.0/cutoffDistance)*(3.0*solventDielectric)/(2.0*solventDielectric+1.0);
+    sanitizer::checkReactionField(cutoffDistance, krf, crf);
 }
 
 /**---------------------------------------------------------------------------------------
@@ -389,6 +391,7 @@ void ReferenceLJCoulombIxn::calculateEwaldIxn(int numberOfAtoms, vector<Vec3>& a
             double t = (r-switchingDistance)/(cutoffDistance-switchingDistance);
             switchValue = 1+t*t*t*(-10+t*(15-t*6));
             switchDeriv = t*t*(-30+t*(60-t*30))/(cutoffDistance-switchingDistance);
+            sanitizer::checkSwitch(switchValue, switchDeriv, cutoffDistance, switchingDistance);
         }
         double alphaR = alphaEwald * r;
 
@@ -600,6 +603,7 @@ void ReferenceLJCoulombIxn::calculateOneIxn(int ii, int jj, vector<Vec3>& atomCo
             double t = (r-switchingDistance)/(cutoffDistance-switchingDistance);
             switchValue = 1+t*t*t*(-10+t*(15-t*6));
             switchDeriv = t*t*(-30+t*(60-t*30))/(cutoffDistance-switchingDistance);
+            sanitizer::checkSwitch(switchValue, switchDeriv, cutoffDistance, switchingDistance);
         }
     }
     double sig = atomParameters[ii][SigIndex] +  atomParameters[jj][SigIndex];

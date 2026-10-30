@@ -29,6 +29,7 @@
 
 #include "ReferenceVirtualSites.h"
 #include "ReferenceForce.h"
+#include "openmm/internal/Sanitizer.h"
 #include "openmm/VirtualSite.h"
 #include "openmm/OpenMMException.h"
 #include <cmath>
@@ -147,6 +148,9 @@ void ReferenceVirtualSites::computePositions(const OpenMM::System& system, vecto
 void ReferenceVirtualSites::distributeForces(const OpenMM::System& system, const vector<OpenMM::Vec3>& atomCoordinates, vector<OpenMM::Vec3>& forces, const Vec3* boxVectors) const {
     Vec3 recipBoxVectors[3];
     ReferenceForce::invertBoxVectors(boxVectors, recipBoxVectors);
+    vector<Vec3> forcesBefore;
+    if (sanitizer::enabled())
+        forcesBefore = forces;
     for (auto iter = order.rbegin(); iter != order.rend(); ++iter) {
         int i = *iter;
         Vec3 f = forces[i];
@@ -258,6 +262,62 @@ void ReferenceVirtualSites::distributeForces(const OpenMM::System& system, const
                          f[1]*recipBoxVectors[1][1] + f[2]*recipBoxVectors[2][1],
                          f[2]*recipBoxVectors[2][2]);
             forces[site.getParticle(0)] += f;
+        }
+    }
+    if (sanitizer::enabled()) {
+        // A virtual site whose position is translation invariant in its parents passes its whole force on to them.
+        bool symmetry = false, onlyAverage = true;
+        int numSites = 0;
+        for (int i = 0; i < system.getNumParticles(); i++)
+            if (system.isVirtualSite(i)) {
+                numSites++;
+                const VirtualSite& site = system.getVirtualSite(i);
+                if (dynamic_cast<const SymmetrySite*>(&site) != NULL)
+                    symmetry = true;
+                if (dynamic_cast<const TwoParticleAverageSite*>(&site) == NULL && dynamic_cast<const ThreeParticleAverageSite*>(&site) == NULL)
+                    onlyAverage = false;
+            }
+        if (numSites > 0 && !symmetry) {
+            Vec3 sumBefore, sumAfter, torqueBefore, torqueAfter;
+            double scale = 0, tscale = 0;
+            for (int i = 0; i < system.getNumParticles(); i++) {
+                sumBefore += forcesBefore[i];
+                scale += sanitizer::norm(forcesBefore[i]);
+                if (!system.isVirtualSite(i)) {
+                    sumAfter += forces[i];
+                    scale += sanitizer::norm(forces[i]);
+                }
+                if (onlyAverage) {
+                    torqueBefore += atomCoordinates[i].cross(forcesBefore[i]);
+                    tscale += sanitizer::norm(atomCoordinates[i])*sanitizer::norm(forcesBefore[i]);
+                    if (!system.isVirtualSite(i)) {
+                        torqueAfter += atomCoordinates[i].cross(forces[i]);
+                        tscale += sanitizer::norm(atomCoordinates[i])*sanitizer::norm(forces[i]);
+                    }
+                }
+            }
+            double n = system.getNumParticles();
+            if (sanitizer::norm(sumAfter-sumBefore) > 1024*sanitizer::EPS*n*scale)
+                sanitizer::alarm("VS-001", "virtual_site_force_spread", "force sum " + sanitizer::num(sanitizer::norm(sumAfter-sumBefore), scale));
+            if (onlyAverage && sanitizer::norm(torqueAfter-torqueBefore) > 1024*sanitizer::EPS*n*tscale) {
+                // Only meaningful when each site sits at the weighted average of its parents (no periodic wrapping in between).
+                bool consistent = true;
+                for (int i = 0; i < system.getNumParticles() && consistent; i++) {
+                    if (!system.isVirtualSite(i))
+                        continue;
+                    const VirtualSite& site = system.getVirtualSite(i);
+                    Vec3 avg;
+                    for (int j = 0; j < site.getNumParticles(); j++) {
+                        double w = dynamic_cast<const TwoParticleAverageSite*>(&site) != NULL ?
+                            dynamic_cast<const TwoParticleAverageSite&>(site).getWeight(j) : dynamic_cast<const ThreeParticleAverageSite&>(site).getWeight(j);
+                        avg += atomCoordinates[site.getParticle(j)]*w;
+                    }
+                    if (sanitizer::norm(avg-atomCoordinates[i]) > 1e3*sanitizer::EPS*(1+sanitizer::norm(atomCoordinates[i])))
+                        consistent = false;
+                }
+                if (consistent)
+                    sanitizer::alarm("VS-002", "virtual_site_force_spread", "torque " + sanitizer::num(sanitizer::norm(torqueAfter-torqueBefore), tscale));
+            }
         }
     }
 }

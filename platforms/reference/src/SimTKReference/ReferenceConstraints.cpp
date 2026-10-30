@@ -34,6 +34,7 @@
 #include "openmm/OpenMMException.h"
 #include <map>
 #include <utility>
+#include "openmm/internal/Sanitizer.h"
 #include <vector>
 
 using namespace OpenMM;
@@ -63,6 +64,10 @@ ReferenceConstraints::ReferenceConstraints(const System& system) : ccma(NULL), s
             constraintCount[p2]++;
         }
     }
+
+    sanAtom1 = atom1;
+    sanAtom2 = atom2;
+    sanDistance = distance;
 
     // Identify clusters of three atoms that can be treated with SETTLE.  First, for every
     // atom that might be part of such a cluster, make a list of the two other atoms it is
@@ -190,10 +195,38 @@ ReferenceConstraints::~ReferenceConstraints() {
 }
 
 void ReferenceConstraints::apply(vector<OpenMM::Vec3>& atomCoordinates, vector<OpenMM::Vec3>& atomCoordinatesP, vector<double>& inverseMasses, double tolerance) {
+    vector<Vec3> before;
+    if (sanitizer::enabled())
+        before = atomCoordinatesP;
     if (ccma != NULL)
         ccma->apply(atomCoordinates, atomCoordinatesP, inverseMasses, tolerance);
     if (settle != NULL)
         settle->apply(atomCoordinates, atomCoordinatesP, inverseMasses, tolerance);
+    if (!sanitizer::enabled())
+        return;
+
+    // The solver stops when every constrained distance is within the tolerance.
+    double worst = 0;
+    for (size_t i = 0; i < sanAtom1.size(); i++) {
+        Vec3 d = atomCoordinatesP[sanAtom1[i]]-atomCoordinatesP[sanAtom2[i]];
+        double err = fabs(sanitizer::norm(d)-sanDistance[i])/sanDistance[i];
+        worst = max(worst, err);
+    }
+    if (worst > 2*tolerance + 1e-12)
+        sanitizer::alarm("CON-001", "constraint_postcondition", "relative distance error " + sanitizer::num(worst, 2*tolerance));
+
+    // Constraint forces are internal: the mass-weighted displacement they cause sums to zero.
+    Vec3 sum;
+    double scale = 0;
+    for (size_t i = 0; i < atomCoordinatesP.size(); i++)
+        if (inverseMasses[i] != 0.0) {
+            Vec3 dx = atomCoordinatesP[i]-before[i];
+            sum += dx/inverseMasses[i];
+            // Positions are rebuilt from absolute coordinates, so rounding scales with |x|, not only with the displacement.
+            scale += (sanitizer::norm(dx)+sanitizer::norm(atomCoordinatesP[i]))/inverseMasses[i];
+        }
+    if (sanitizer::norm(sum) > 1024*sanitizer::EPS*(double) atomCoordinatesP.size()*scale)
+        sanitizer::alarm("CON-003", "constraint_momentum", "net displacement impulse " + sanitizer::num(sanitizer::norm(sum), scale));
 }
 
 void ReferenceConstraints::applyToVelocities(vector<OpenMM::Vec3>& atomCoordinates, vector<OpenMM::Vec3>& velocities, vector<double>& inverseMasses, double tolerance) {
@@ -201,4 +234,22 @@ void ReferenceConstraints::applyToVelocities(vector<OpenMM::Vec3>& atomCoordinat
         ccma->applyToVelocities(atomCoordinates, velocities, inverseMasses, tolerance);
     if (settle != NULL)
         settle->applyToVelocities(atomCoordinates, velocities, inverseMasses, tolerance);
+    if (!sanitizer::enabled())
+        return;
+
+    // After projection no constrained pair moves along its bond.
+    double vmax = 0;
+    for (size_t i = 0; i < velocities.size(); i++)
+        vmax = max(vmax, sanitizer::norm(velocities[i]));
+    double worst = 0;
+    for (size_t i = 0; i < sanAtom1.size(); i++) {
+        Vec3 e = atomCoordinates[sanAtom1[i]]-atomCoordinates[sanAtom2[i]];
+        double len = sanitizer::norm(e);
+        if (len == 0)
+            continue;
+        Vec3 dv = velocities[sanAtom1[i]]-velocities[sanAtom2[i]];
+        worst = max(worst, fabs(dv.dot(e))/len);
+    }
+    if (worst > 2*tolerance*vmax + 1e3*sanitizer::EPS*vmax)
+        sanitizer::alarm("CON-002", "constraint_postcondition", "relative speed along bond " + sanitizer::num(worst, vmax));
 }
