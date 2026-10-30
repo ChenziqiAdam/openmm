@@ -64,7 +64,12 @@ using Lepton::CustomFunction;
 
 // A tabulated function interpolates its data: evaluating it at a grid node returns the stored value.  For a periodic
 // dimension the last node is identified with the first and is not checked.
-static void checkNodes(const char* what, const Lepton::CustomFunction& f, const std::vector<double>& values, const std::vector<std::vector<double> >& nodes, bool periodic) {
+static void checkNodes(const char* what, const Lepton::CustomFunction& f, const std::vector<double>& values, const std::vector<std::vector<double> >& limits, bool periodic) {
+    // limits[d] = {min, max, count}; node positions are recomputed here rather than taken from the implementation.
+    std::vector<std::vector<double> > nodes(limits.size());
+    for (size_t d = 0; d < limits.size(); d++)
+        for (int i = 0; i < (int) limits[d][2]; i++)
+            nodes[d].push_back(limits[d][0] + i*(limits[d][1]-limits[d][0])/(limits[d][2]-1));
     if (!OpenMM::sanitizer::enabled() || values.size() > 100000)
         return;
     double scale = 0;
@@ -125,7 +130,10 @@ ReferenceContinuous1DFunction::ReferenceContinuous1DFunction(const Continuous1DF
     for (int i = 0; i < numValues; i++)
         x[i] = min+i*(max-min)/(numValues-1);
     SplineFitter::createSpline(x, values, periodic, derivs);
-    checkNodes("1D", *this, values, std::vector<std::vector<double> >(1, x), periodic);
+    {
+        std::vector<std::vector<double> > lim; lim.push_back({min, max, (double) values.size()});
+        checkNodes("1D", *this, values, lim, periodic);
+    }
 }
 
 ReferenceContinuous1DFunction::ReferenceContinuous1DFunction(const ReferenceContinuous1DFunction& other) : function(other.function) {
@@ -169,8 +177,8 @@ ReferenceContinuous2DFunction::ReferenceContinuous2DFunction(const Continuous2DF
         y[i] = ymin+i*(ymax-ymin)/(ysize-1);
     SplineFitter::create2DSpline(x, y, values, periodic, c);
     {
-        std::vector<std::vector<double> > nodes; nodes.push_back(x); nodes.push_back(y);
-        checkNodes("2D", *this, values, nodes, periodic);
+        std::vector<std::vector<double> > lim; lim.push_back({xmin, xmax, (double) xsize}); lim.push_back({ymin, ymax, (double) ysize});
+        checkNodes("2D", *this, values, lim, periodic);
     }
 }
 
@@ -231,8 +239,8 @@ ReferenceContinuous3DFunction::ReferenceContinuous3DFunction(const Continuous3DF
         z[i] = zmin+i*(zmax-zmin)/(zsize-1);
     SplineFitter::create3DSpline(x, y, z, values, periodic, c);
     {
-        std::vector<std::vector<double> > nodes; nodes.push_back(x); nodes.push_back(y); nodes.push_back(z);
-        checkNodes("3D", *this, values, nodes, periodic);
+        std::vector<std::vector<double> > lim; lim.push_back({xmin, xmax, (double) xsize}); lim.push_back({ymin, ymax, (double) ysize}); lim.push_back({zmin, zmax, (double) zsize});
+        checkNodes("3D", *this, values, lim, periodic);
     }
 }
 
