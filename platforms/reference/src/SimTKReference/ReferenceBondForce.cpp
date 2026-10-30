@@ -27,6 +27,7 @@
 
 #include "SimTKOpenMMUtilities.h"
 #include "ReferenceBondForce.h"
+#include "openmm/internal/Sanitizer.h"
 
 using std::vector;
 using namespace OpenMM;
@@ -75,6 +76,7 @@ void ReferenceBondForce::calculateForce(int numberOfBonds, vector<vector<int> >&
 
       // calculate bond ixn
 
+      OpenMM::sanitizer::TermProbe probe(forces, atomCoordinates, &atomIndices[ii][0], atomIndices[ii].size());
       referenceBondIxn.calculateBondIxn(atomIndices[ii], atomCoordinates, parameters[ii], 
                                         forces, totalEnergy, NULL);
    }

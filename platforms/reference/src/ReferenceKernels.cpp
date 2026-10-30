@@ -2673,7 +2673,7 @@ void ReferenceIntegrateVerletStepKernel::execute(ContextImpl& context, const Ver
     if (sanitizer::enabled())
         posBefore = posData;
     dynamics->update(context.getSystem(), posData, velData, forceData, masses, integrator.getConstraintTolerance(), extractBoxVectors(context));
-    sanitizer::checkMasslessFixed(context.getSystem(), posBefore, posData);
+    sanitizer::checkMasslessFixed(context.getSystem(), masses, posBefore, posData);
     data.time += stepSize;
     data.stepCount++;
 }
@@ -2985,7 +2985,7 @@ void ReferenceIntegrateLangevinMiddleStepKernel::execute(ContextImpl& context, c
     if (sanitizer::enabled())
         posBefore = posData;
     dynamics->update(context, posData, velData, masses, integrator.getConstraintTolerance(), extractBoxVectors(context));
-    sanitizer::checkMasslessFixed(context.getSystem(), posBefore, posData);
+    sanitizer::checkMasslessFixed(context.getSystem(), masses, posBefore, posData);
     data.time += stepSize;
     data.stepCount++;
 }
@@ -3374,8 +3374,9 @@ void ReferenceRemoveCMMotionKernel::execute(ContextImpl& context) {
     // Calculate the center of mass momentum.
     
     double momentum[] = {0.0, 0.0, 0.0};
-    double mass = 0.0;
+    double mass = 0.0, sanScale = 0.0;
     for (size_t i = 0; i < masses.size(); ++i) {
+        sanScale += masses[i]*sanitizer::norm(velData[i]);
         momentum[0] += masses[i]*velData[i][0];
         momentum[1] += masses[i]*velData[i][1];
         momentum[2] += masses[i]*velData[i][2];
@@ -3393,7 +3394,7 @@ void ReferenceRemoveCMMotionKernel::execute(ContextImpl& context) {
             velData[i][1] -= momentum[1];
             velData[i][2] -= momentum[2];
         }
-    }    sanitizer::checkZeroMomentum(masses, velData);
+    }    sanitizer::checkZeroMomentum(masses, velData, sanScale);
 }
 
 void ReferenceCalcATMForceKernel::loadParams(int numParticles, const ATMForce& force) {

@@ -24,6 +24,7 @@
 
 #include "ReferenceCMAPTorsionIxn.h"
 #include "ReferenceForce.h"
+#include "openmm/internal/Sanitizer.h"
 
 using std::vector;
 using namespace OpenMM;
@@ -60,8 +61,13 @@ void ReferenceCMAPTorsionIxn::setPeriodic(OpenMM::Vec3* vectors) {
    --------------------------------------------------------------------------------------- */
 
 void ReferenceCMAPTorsionIxn::calculateIxn(vector<Vec3>& atomCoordinates, vector<Vec3>& forces, double* totalEnergy) const {
-    for (unsigned int i = 0; i < torsionMaps.size(); i++)
+    for (unsigned int i = 0; i < torsionMaps.size(); i++) {
+        int probeAtoms[8];
+        for (int k = 0; k < 8; k++)
+            probeAtoms[k] = torsionIndices[i][k];
+        OpenMM::sanitizer::TermProbe probe(forces, atomCoordinates, probeAtoms, 8);
         calculateOneIxn(i, atomCoordinates, forces, totalEnergy);
+    }
 }
 
 /**---------------------------------------------------------------------------------------

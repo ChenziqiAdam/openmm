@@ -69,7 +69,8 @@ static void checkNodes(const char* what, const Lepton::CustomFunction& f, const 
     std::vector<std::vector<double> > nodes(limits.size());
     for (size_t d = 0; d < limits.size(); d++)
         for (int i = 0; i < (int) limits[d][2]; i++)
-            nodes[d].push_back(limits[d][0] + i*(limits[d][1]-limits[d][0])/(limits[d][2]-1));
+            // The last node is the upper limit itself; the recomputed value can round above it, where the function is zero by definition.
+            nodes[d].push_back(i == (int) limits[d][2]-1 ? limits[d][1] : limits[d][0] + i*(limits[d][1]-limits[d][0])/(limits[d][2]-1));
     if (!OpenMM::sanitizer::enabled() || values.size() > 100000)
         return;
     double scale = 0;

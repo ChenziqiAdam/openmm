@@ -209,6 +209,8 @@ void NoseHooverIntegrator::initializeThermostats(const System &system) {
                     simple = false;
                 if (system.getParticleMass(p) > 0)
                     expected += 3;
+                else
+                    simple = false; // massless thermostated particles are rejected when the context is created
             }
         }
         for (int i = 0; i < system.getNumConstraints(); i++) {

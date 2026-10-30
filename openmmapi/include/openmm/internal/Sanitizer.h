@@ -125,11 +125,12 @@ inline void checkNeighborCompleteness(int n, const std::vector<Vec3>& pos, const
 /**
  * A particle with zero mass that is not a virtual site is not moved by an integration step.
  */
-inline void checkMasslessFixed(const System& system, const std::vector<Vec3>& before, const std::vector<Vec3>& after) {
-    if (!enabled() || before.size() != after.size())
+inline void checkMasslessFixed(const System& system, const std::vector<double>& masses, const std::vector<Vec3>& before, const std::vector<Vec3>& after) {
+    // The masses are the ones the integrator uses (a later System::setParticleMass has no effect until reinitialization).
+    if (!enabled() || before.size() != after.size() || (int) masses.size() != system.getNumParticles())
         return;
     for (int i = 0; i < system.getNumParticles(); i++)
-        if (system.getParticleMass(i) == 0.0 && !system.isVirtualSite(i) && (after[i][0] != before[i][0] || after[i][1] != before[i][1] || after[i][2] != before[i][2])) {
+        if (masses[i] == 0.0 && !system.isVirtualSite(i) && (after[i][0] != before[i][0] || after[i][1] != before[i][1] || after[i][2] != before[i][2])) {
             alarm("ZM-001", "massless_particle_fixed", "particle " + num(i) + " moved");
             return;
         }
@@ -138,7 +139,7 @@ inline void checkMasslessFixed(const System& system, const std::vector<Vec3>& be
 /**
  * Total momentum of the massive particles vanishes after center-of-mass motion removal.
  */
-inline void checkZeroMomentum(const std::vector<double>& masses, const std::vector<Vec3>& vel) {
+inline void checkZeroMomentum(const std::vector<double>& masses, const std::vector<Vec3>& vel, double scaleBefore) {
     if (!enabled())
         return;
     Vec3 p;
@@ -148,6 +149,8 @@ inline void checkZeroMomentum(const std::vector<double>& masses, const std::vect
             p += vel[i]*masses[i];
             scale += masses[i]*norm(vel[i]);
         }
+    // The mean velocity is subtracted from velocities that may be much larger than the result, so rounding scales with the velocities before removal.
+    scale += scaleBefore;
     if (norm(p) > 1024*EPS*(double) masses.size()*scale)
         alarm("CM-001", "momentum_removal", "residual momentum " + num(norm(p), scale));
 }
@@ -171,6 +174,11 @@ inline void checkBarostatMove(double proposedVolume, const Vec3* oldBox, const V
     if (std::fabs(volume-proposedVolume) > 64*EPS*proposedVolume)
         alarm("BARO-002", "barostat_volume", "box volume " + num(volume, proposedVolume));
     double worst = 0;
+    // Fractional coordinates are formed by dividing absolute positions by the box (with shear terms), so their rounding
+    // grows with how far the centers are from the origin in box units and with the tilt of the box.
+    double mindiag = std::fmin(newBox[0][0], std::fmin(newBox[1][1], newBox[2][2]));
+    double tilt = (std::fabs(newBox[1][0])+std::fabs(newBox[2][0])+std::fabs(newBox[2][1]))/mindiag;
+    double reach = 0;
     for (size_t u = 0; u < units.size(); u++) {
         Vec3 c0, c1;
         for (size_t k = 0; k < units[u].size(); k++) {
@@ -181,10 +189,52 @@ inline void checkBarostatMove(double proposedVolume, const Vec3* oldBox, const V
         c1 /= (double) units[u].size();
         Vec3 d = fractional(newBox, c1)-fractional(oldBox, c0);
         worst = std::fmax(worst, norm(d));
+        reach = std::fmax(reach, std::fmax(norm(c0), norm(c1)));
     }
-    if (worst > 1024*EPS*(double) before.size())
+    if (worst > 1024*EPS*(double) before.size()*(1+reach/mindiag)*(1+tilt))
         alarm("BARO-003", "barostat_affine", "fractional shift " + num(worst));
 }
+
+/**
+ * Running magnitude of the individual terms (pairs, bonds, torsions) a kernel added to the force array.  Rounding in the
+ * accumulated sum scales with these, not with the (possibly cancelled) net force on each particle.
+ */
+struct TermScale {
+    double force, torque;
+};
+
+inline TermScale& termScale() {
+    static TermScale scale = {0.0, 0.0};
+    return scale;
+}
+
+/**
+ * Brackets one force term: on destruction adds the size of the change it made to the force on its particles.
+ */
+class TermProbe {
+public:
+    TermProbe(const std::vector<Vec3>& f, const std::vector<Vec3>& x, const int* idx, int n) : forces(f), pos(x), count(0) {
+        if (!enabled())
+            return;
+        count = n < 8 ? n : 8;
+        for (int k = 0; k < count; k++) {
+            atoms[k] = idx[k];
+            before[k] = f[idx[k]];
+        }
+    }
+    ~TermProbe() {
+        for (int k = 0; k < count; k++) {
+            double d = norm(forces[atoms[k]]-before[k]);
+            termScale().force += d;
+            termScale().torque += norm(pos[atoms[k]])*d;
+        }
+    }
+private:
+    const std::vector<Vec3>& forces;
+    const std::vector<Vec3>& pos;
+    int count, atoms[8];
+    Vec3 before[8];
+};
 
 /**
  * Records the force array before a kernel adds its contribution, then checks that the contribution is
@@ -193,8 +243,10 @@ inline void checkBarostatMove(double proposedVolume, const Vec3* oldBox, const V
 class ForceBalance {
 public:
     ForceBalance(const std::vector<Vec3>& forces) {
-        if (enabled())
+        if (enabled()) {
             before = forces;
+            termScale().force = termScale().torque = 0.0;
+        }
     }
     void check(const char* forceId, const char* torqueId, const std::vector<Vec3>& after, const std::vector<Vec3>& pos, bool torque) const {
         if (!enabled() || before.size() != after.size())
@@ -213,7 +265,10 @@ public:
                 tscale += norm(pos[i])*mag;
             }
         }
-        // Each pairwise/bonded term cancels exactly up to rounding; slack grows with the particle count and the force scale.
+        // Each pairwise/bonded term cancels exactly up to rounding; slack grows with the particle count and the force scale
+        // (array magnitudes plus the magnitudes of the individual terms that were summed).
+        fscale += termScale().force;
+        tscale += termScale().torque;
         double ftol = 1024*EPS*(double) n*fscale;
         if (norm(sum) > ftol)
             alarm(forceId, "force_net_zero", "net force " + num(norm(sum), ftol));

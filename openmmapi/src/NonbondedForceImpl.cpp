@@ -298,7 +298,10 @@ static void sanitizeDispersion(const System& system, const NonbondedForce& force
     // self pairs; the switched region adds back the part of the potential the switch removed), in the variable u = 1/r where the unswitched integrand is a polynomial.
     double rc = force.getCutoffDistance(), rsw = force.getSwitchingDistance();
     bool useSwitch = force.getUseSwitchingFunction();
-    const int steps = 512;
+    // Below this relative width the closed form used by the library loses digits to cancellation (about eps*(rc/width)^5); no verdict.
+    if (useSwitch && rc-rsw < 0.03*rc)
+        return;
+    const int steps = 512, switchSteps = 4096;
     double total = 0, magnitude = 0;
     for (int i = 0; i < n; i++)
         for (int j = i; j < n; j++) {
@@ -312,19 +315,26 @@ static void sanitizeDispersion(const System& system, const NonbondedForce& force
                 sum += f*(q == 0 || q == steps ? 1 : (q%2 ? 4 : 2));
             }
             double tail = sum*h/3;
+            // The repulsive and attractive tails can cancel, so the allowance follows their sizes, not their difference.
+            double scale = 16*M_PI*eps*(s6*s6/(9*pow(rc, 9)) + s6/(3*pow(rc, 3)));
             if (useSwitch) {
-                double hr = (rc-rsw)/steps, sw = 0;
-                for (int q = 0; q <= steps; q++) {
-                    double r = rsw + q*hr;
+                // The switched region is integrated in log r, where the r^-10 integrand is smooth.
+                double ls = log(rc/rsw)/switchSteps, sw = 0, swScale = 0;
+                for (int q = 0; q <= switchSteps; q++) {
+                    double r = rsw*exp(q*ls);
                     double t = (r-rsw)/(rc-rsw);
                     double S = 1+t*t*t*(-10+t*(15-t*6));
                     double ur = 4*eps*(pow(sig/r, 12)-pow(sig/r, 6));
-                    sw += (1-S)*ur*4*M_PI*r*r*(q == 0 || q == steps ? 1 : (q%2 ? 4 : 2));
+                    double ua = 4*eps*(pow(sig/r, 12)+pow(sig/r, 6));
+                    double w = (q == 0 || q == switchSteps ? 1 : (q%2 ? 4 : 2))*4*M_PI*r*r*r;
+                    sw += (1-S)*ur*w;
+                    swScale += fabs(1-S)*ua*w;
                 }
-                tail += sw*hr/3;
+                tail += sw*ls/3;
+                scale += swScale*ls/3;
             }
             total += tail;
-            magnitude += fabs(tail);
+            magnitude += scale;
         }
     double numInteractions = n*(n+1)/2.0;
     double expected = 0.5*n*n*total/numInteractions;

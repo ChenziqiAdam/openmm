@@ -555,16 +555,22 @@ void ReferenceLJCoulombIxn::calculatePairIxn(int numberOfAtoms, vector<Vec3>& at
     if (!includeDirect)
         return;
     if (cutoff) {
-        for (auto& pair : *neighborList)
+        for (auto& pair : *neighborList) {
+            int probeAtoms[2] = {(int) pair.first, (int) pair.second};
+            sanitizer::TermProbe probe(forces, atomCoordinates, probeAtoms, 2);
             calculateOneIxn(pair.first, pair.second, atomCoordinates, atomParameters, forces, totalEnergy);
+        }
     }
     else {
         for (int ii = 0; ii < numberOfAtoms; ii++) {
             // loop over atom pairs
 
             for (int jj = ii+1; jj < numberOfAtoms; jj++)
-                if (exclusions[jj].find(ii) == exclusions[jj].end())
+                if (exclusions[jj].find(ii) == exclusions[jj].end()) {
+                    int probeAtoms[2] = {ii, jj};
+                    sanitizer::TermProbe probe(forces, atomCoordinates, probeAtoms, 2);
                     calculateOneIxn(ii, jj, atomCoordinates, atomParameters, forces, totalEnergy);
+                }
         }
     }
 }

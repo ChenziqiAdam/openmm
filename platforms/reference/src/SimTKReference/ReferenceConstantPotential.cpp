@@ -553,7 +553,16 @@ void ReferenceConstantPotential::sanitizeSolution(int numParticles, int numElect
         for (int ii = 0; ii < numElectrodeParticles; ii++)
             error += (grad[ii]-offset)*(grad[ii]-offset);
         double target = cgErrorTol*cgErrorTol*numElectrodeParticles;
-        if (error > 4*target)
+        // The residual cannot be recomputed more accurately than the rounding of the potentials that enter it (those at zero charge).
+        std::vector<double> zeroCharges = charges, grad0(numElectrodeParticles);
+        for (int ii = 0; ii < numElectrodeParticles; ii++)
+            zeroCharges[elecToSys[ii]] = 0.0;
+        getDerivatives(numParticles, numElectrodeParticles, posData, zeroCharges, exclusions, sysToElec, elecToSys, electrodeParamArray, grad0, pme);
+        double norm0 = 0;
+        for (int ii = 0; ii < numElectrodeParticles; ii++)
+            norm0 += grad0[ii]*grad0[ii];
+        double floorError = 64*64*sanitizer::EPS*sanitizer::EPS*norm0;
+        if (error > 4*target + floorError)
             sanitizer::alarm("CP-002", "constant_potential_convergence", "residual " + sanitizer::num(error, target));
     }
 }

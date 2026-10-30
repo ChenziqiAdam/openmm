@@ -268,6 +268,7 @@ void ReferenceVirtualSites::distributeForces(const OpenMM::System& system, const
         // A virtual site whose position is translation invariant in its parents passes its whole force on to them.
         bool symmetry = false, onlyAverage = true;
         int numSites = 0;
+        bool unitWeights = true;
         for (int i = 0; i < system.getNumParticles(); i++)
             if (system.isVirtualSite(i)) {
                 numSites++;
@@ -276,6 +277,21 @@ void ReferenceVirtualSites::distributeForces(const OpenMM::System& system, const
                     symmetry = true;
                 if (dynamic_cast<const TwoParticleAverageSite*>(&site) == NULL && dynamic_cast<const ThreeParticleAverageSite*>(&site) == NULL)
                     onlyAverage = false;
+                // The position is translation invariant only if the weights of the parent positions sum to one (the API does not enforce it).
+                double weightSum = 1.0;
+                if (const TwoParticleAverageSite* two = dynamic_cast<const TwoParticleAverageSite*>(&site))
+                    weightSum = two->getWeight(0)+two->getWeight(1);
+                else if (const ThreeParticleAverageSite* three = dynamic_cast<const ThreeParticleAverageSite*>(&site))
+                    weightSum = three->getWeight(0)+three->getWeight(1)+three->getWeight(2);
+                else if (const LocalCoordinatesSite* local = dynamic_cast<const LocalCoordinatesSite*>(&site)) {
+                    std::vector<double> originWeights;
+                    local->getOriginWeights(originWeights);
+                    weightSum = 0.0;
+                    for (double w : originWeights)
+                        weightSum += w;
+                }
+                if (fabs(weightSum-1.0) > 1e-12)
+                    unitWeights = false;
             }
         if (numSites > 0 && !symmetry) {
             Vec3 sumBefore, sumAfter, torqueBefore, torqueAfter;
@@ -297,7 +313,7 @@ void ReferenceVirtualSites::distributeForces(const OpenMM::System& system, const
                 }
             }
             double n = system.getNumParticles();
-            if (sanitizer::norm(sumAfter-sumBefore) > 1024*sanitizer::EPS*n*scale)
+            if (unitWeights && sanitizer::norm(sumAfter-sumBefore) > 1024*sanitizer::EPS*n*scale)
                 sanitizer::alarm("VS-001", "virtual_site_force_spread", "force sum " + sanitizer::num(sanitizer::norm(sumAfter-sumBefore), scale));
             if (onlyAverage && sanitizer::norm(torqueAfter-torqueBefore) > 1024*sanitizer::EPS*n*tscale) {
                 // Only meaningful when each site sits at the weighted average of its parents (no periodic wrapping in between).

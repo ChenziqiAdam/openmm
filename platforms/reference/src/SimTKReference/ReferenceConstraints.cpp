@@ -206,13 +206,20 @@ void ReferenceConstraints::apply(vector<OpenMM::Vec3>& atomCoordinates, vector<O
         return;
 
     // The solver stops when every constrained distance is within the tolerance.
+    double worstRatio = 0;
     double worst = 0;
     for (size_t i = 0; i < sanAtom1.size(); i++) {
         Vec3 d = atomCoordinatesP[sanAtom1[i]]-atomCoordinatesP[sanAtom2[i]];
         double err = fabs(sanitizer::norm(d)-sanDistance[i])/sanDistance[i];
-        worst = max(worst, err);
+        // Beyond the tolerance, the distance cannot be represented better than the spacing of the coordinates.
+        double xmax = max(sanitizer::norm(atomCoordinatesP[sanAtom1[i]]), sanitizer::norm(atomCoordinatesP[sanAtom2[i]]));
+        double allowed = 2*tolerance + 1e-12 + 16*sanitizer::EPS*xmax/sanDistance[i];
+        if (err/allowed > worstRatio) {
+            worstRatio = err/allowed;
+            worst = err;
+        }
     }
-    if (worst > 2*tolerance + 1e-12)
+    if (worstRatio > 1)
         sanitizer::alarm("CON-001", "constraint_postcondition", "relative distance error " + sanitizer::num(worst, 2*tolerance));
 
     // Constraint forces are internal: the mass-weighted displacement they cause sums to zero.
@@ -250,7 +257,9 @@ void ReferenceConstraints::applyToVelocities(vector<OpenMM::Vec3>& atomCoordinat
         if (len == 0)
             continue;
         Vec3 dv = velocities[sanAtom1[i]]-velocities[sanAtom2[i]];
-        double allowed = 2*tolerance*len*(inverseMasses[sanAtom1[i]]+inverseMasses[sanAtom2[i]]) + 1e3*sanitizer::EPS*vmax;
+        // The bond direction is formed from absolute positions, so its rounding (and the parallel component it leaks) grows with |x|/len.
+        double xmax = max(sanitizer::norm(atomCoordinates[sanAtom1[i]]), sanitizer::norm(atomCoordinates[sanAtom2[i]]));
+        double allowed = 2*tolerance*len*(inverseMasses[sanAtom1[i]]+inverseMasses[sanAtom2[i]]) + 1e3*sanitizer::EPS*vmax*(1+xmax/len);
         worstRatio = max(worstRatio, fabs(dv.dot(e))/len/allowed);
     }
     if (worstRatio > 1)

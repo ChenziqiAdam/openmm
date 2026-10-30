@@ -210,6 +210,25 @@ void ReferenceMinimize::minimize(ContextImpl& context, double tolerance, int max
                     fx > data.firstEnergy + 64*sanitizer::EPS*(fabs(fx)+fabs(data.firstEnergy)) + 1e-300)
                 sanitizer::alarm("MIN-001", "minimizer_monotone", "energy rose " + sanitizer::num(data.firstEnergy, fx));
 
+            // The result of a minimization is the point lbfgs returns, so the Context must hold it.  (After a failed line search lbfgs
+            // restores x but the Context keeps the last rejected trial point.)
+            if (sanitizer::enabled()) {
+                vector<Vec3> held;
+                context.getPositions(held);
+                for (int i = 0; i < numParticles; i++) {
+                    if (system.isVirtualSite(i))
+                        continue;
+                    bool differs = false;
+                    for (int d = 0; d < 3; d++)
+                        if (fabs(held[i][d]-x[3*i+d]) > 64*sanitizer::EPS*(1+fabs(x[3*i+d])))
+                            differs = true;
+                    if (differs) {
+                        sanitizer::alarm("MIN-001", "minimizer_monotone", "context holds a point other than the returned minimum at particle " + sanitizer::num(i));
+                        break;
+                    }
+                }
+            }
+
             // Check whether all constraints are satisfied.
 
             vector<Vec3> positions;
