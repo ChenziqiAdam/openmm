@@ -8,8 +8,8 @@
   "instrumented_commit": null,
   "log_env": "OPENMM_SANITIZE_LOG",
   "platform": "Reference",
-  "n_ids": 29,
-  "n_families": 22,
+  "n_ids": 36,
+  "n_families": 29,
   "sanitizers": [
     {
       "id": "CON-001",
@@ -387,6 +387,97 @@
       "observation_point": "after the neighbor list is built",
       "alarm": "a pair closer than cutoff*(1-1e-9) (found by scanning lattice translations) is missing",
       "rationale": "missing pairs silently remove interactions from energies and forces"
+    },
+    {
+      "id": "DOF-001",
+      "category": "scientific",
+      "family": "degrees_of_freedom",
+      "source": "openmmapi/src/NoseHooverIntegrator.cpp",
+      "symbol": "NoseHooverIntegrator::initializeThermostats",
+      "scientific_quantity": "thermostat degrees of freedom",
+      "precondition": "chains of single (non-paired) particles that do not overlap",
+      "invariant": "total DOF = 3 per massive thermostated particle - 1 per constraint between two massive thermostated particles - 3 if a CMMotionRemover is present",
+      "observation_point": "after the CM-removal adjustment",
+      "alarm": "sum of chain DOF differs from the independently counted value",
+      "rationale": "the thermostat temperature is only correct for the true number of kinetic degrees of freedom"
+    },
+    {
+      "id": "TAB-001",
+      "category": "scientific",
+      "family": "interpolation_at_nodes",
+      "source": "platforms/reference/src/ReferenceTabulatedFunction.cpp",
+      "symbol": "ReferenceContinuous{1,2,3}DFunction",
+      "scientific_quantity": "tabulated function values",
+      "precondition": "any continuous tabulated function (the last node of a periodic dimension is identified with the first and not checked)",
+      "invariant": "the spline reproduces the stored value at every grid node (node positions recomputed from min, max, count)",
+      "observation_point": "end of the constructor",
+      "alarm": "value differs from the stored one by more than 1000*eps*max|value|",
+      "rationale": "an interpolating table must return its data"
+    },
+    {
+      "id": "CMAP-001",
+      "category": "scientific",
+      "family": "cmap_surface_continuity",
+      "source": "openmmapi/src/CMAPTorsionForceImpl.cpp",
+      "symbol": "CMAPTorsionForceImpl::calcMapDerivatives",
+      "scientific_quantity": "bicubic CMAP energy surface",
+      "precondition": "any map of size >= 2",
+      "invariant": "every patch reproduces the map energy at its four corners and neighboring patches agree along shared edges, including wrap-around",
+      "observation_point": "end of the coefficient computation",
+      "alarm": "corner or edge mismatch exceeding 1e-9 of the largest map energy",
+      "rationale": "a discontinuous energy surface produces force spikes"
+    },
+    {
+      "id": "GB-001",
+      "category": "scientific",
+      "family": "born_radius_bound",
+      "source": "platforms/reference/src/SimTKReference/ReferenceObc.cpp",
+      "symbol": "ReferenceObc::computeBornRadii",
+      "scientific_quantity": "effective Born radius",
+      "precondition": "OBC GB with positive radii",
+      "invariant": "descreening by neighbors can only push the effective Born radius outward from the offset intrinsic radius, and it is finite",
+      "observation_point": "after each Born radius is computed",
+      "alarm": "radius below the offset radius (beyond 64*eps) or non-finite",
+      "rationale": "a Born radius smaller than the atom's own radius is unphysical"
+    },
+    {
+      "id": "CP-001",
+      "category": "scientific",
+      "family": "constant_potential_charge",
+      "source": "platforms/reference/src/SimTKReference/ReferenceConstantPotential.cpp",
+      "symbol": "ReferenceConstantPotential::sanitizeSolution",
+      "scientific_quantity": "total electrode charge",
+      "precondition": "ConstantPotentialForce with the charge constraint enabled",
+      "invariant": "after solving the electrode charges sum to the requested total",
+      "observation_point": "after the charge solve",
+      "alarm": "sum of electrode charges differs from the target by more than 1000*eps*sum|q|",
+      "rationale": "the constraint defines the total charge of the electrodes"
+    },
+    {
+      "id": "CP-002",
+      "category": "scientific",
+      "family": "constant_potential_convergence",
+      "source": "platforms/reference/src/SimTKReference/ReferenceConstantPotential.cpp",
+      "symbol": "ReferenceConstantPotential::sanitizeSolution",
+      "scientific_quantity": "electrode potential residual",
+      "precondition": "conjugate-gradient solver",
+      "invariant": "at exit the gradient of the energy with respect to electrode charges (projected onto the constraint plane when active) is within the requested tolerance",
+      "observation_point": "after the charge solve (gradient recomputed independently)",
+      "alarm": "squared projected residual exceeds 4*tol^2*N",
+      "rationale": "the charges must satisfy the constant-potential condition to the requested accuracy"
+    },
+    {
+      "id": "MIN-001",
+      "category": "scientific",
+      "family": "minimizer_monotone",
+      "source": "platforms/reference/src/SimTKReference/ReferenceMinimize.cpp",
+      "symbol": "ReferenceMinimize::minimize",
+      "scientific_quantity": "potential energy along a minimization",
+      "precondition": "System without distance constraints (the objective is then the potential energy)",
+      "invariant": "a line-search minimizer does not end above its starting energy",
+      "observation_point": "after lbfgs returns",
+      "alarm": "final energy exceeds the first evaluated energy by more than 64*eps*(|e0|+|e1|)",
+      "rationale": "minimization must not make the energy worse"
     }
   ]
 }
