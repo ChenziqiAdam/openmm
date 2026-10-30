@@ -5,7 +5,7 @@
   "fork": "ChenziqiAdam/openmm",
   "branch": "scibench-new-core-pilot",
   "base_commit": "ad0c51cf041081c138507e23cdbf8360d983ac4e",
-  "instrumented_commit": null,
+  "instrumented_commit": "f50516f633a6b47df4c32d07a4b9d4c3a34f8338",
   "log_env": "OPENMM_SANITIZE_LOG",
   "platform": "Reference",
   "n_ids": 36,
@@ -21,7 +21,7 @@
       "precondition": "any System with distance constraints between particles that are not both massless; any integrator that projects positions",
       "invariant": "after projection every constrained distance equals its target within the constraint tolerance",
       "observation_point": "after the position projection (CCMA and SETTLE)",
-      "alarm": "relative distance error exceeds twice the tolerance plus 1e-12",
+      "alarm": "relative distance error exceeds twice the tolerance plus 1e-12 plus 16*eps*|x|/d (coordinate spacing)",
       "rationale": "a rigid bond length that drifts changes the dynamics the constraint is meant to remove"
     },
     {
@@ -190,7 +190,7 @@
       "precondition": "NoCutoff or CutoffNonPeriodic, any parameters and exceptions",
       "invariant": "pairwise forces cancel, so the nonbonded forces sum to zero",
       "observation_point": "end of the kernel, force delta of this kernel only",
-      "alarm": "norm of the summed force delta exceeds 1024*eps*N times the force scale",
+      "alarm": "norm of the summed force delta exceeds 1024*eps*N times the force scale (array magnitudes plus the magnitudes of the individual pair terms)",
       "rationale": "net force from pair interactions would accelerate the center of mass"
     },
     {
@@ -213,7 +213,7 @@
       "source": "platforms/reference/src/SimTKReference/ReferenceVirtualSites.cpp",
       "symbol": "ReferenceVirtualSites::distributeForces",
       "scientific_quantity": "force on a virtual site",
-      "precondition": "System with virtual sites and no SymmetrySite (whose position is not translation invariant)",
+      "precondition": "System with virtual sites, none a SymmetrySite, and every average / local-coordinates site having origin weights that sum to 1 (otherwise the site is not translation invariant)",
       "invariant": "a virtual site's position moves rigidly with its parents, so spreading its force conserves the total force",
       "observation_point": "after all virtual-site forces have been spread",
       "alarm": "total force on non-virtual particles differs from the total force before spreading beyond 1024*eps*N times the force scale",
@@ -242,7 +242,7 @@
       "precondition": "a CMMotionRemover with at least one massive particle",
       "invariant": "after removal the momentum of the massive particles vanishes",
       "observation_point": "end of the removal step",
-      "alarm": "norm of sum(m*v) exceeds 1024*eps*N times sum(m*|v|)",
+      "alarm": "norm of sum(m*v) exceeds 1024*eps*N times the sum of m*|v| before and after the removal",
       "rationale": "the purpose of the remover is zero center-of-mass drift"
     },
     {
@@ -252,7 +252,7 @@
       "source": "platforms/reference/src/ReferenceKernels.cpp",
       "symbol": "ReferenceIntegrate{Verlet,LangevinMiddle}StepKernel::execute",
       "scientific_quantity": "position of a massless particle",
-      "precondition": "particle with zero mass that is not a virtual site",
+      "precondition": "particle whose mass in the integrator is zero and that is not a virtual site",
       "invariant": "an integration step does not move it",
       "observation_point": "after dynamics->update",
       "alarm": "its position changes",
@@ -294,7 +294,7 @@
       "precondition": "isotropic Monte Carlo barostat, geometric center of each independently scaled unit",
       "invariant": "a volume move is an affine map: fractional coordinates of the units in the box do not change",
       "observation_point": "after the box and coordinates are scaled",
-      "alarm": "fractional shift of a unit center exceeds 1024*eps*N",
+      "alarm": "fractional shift of a unit center exceeds 1024*eps*N times factors for distance from the origin in box units and box tilt",
       "rationale": "coordinates and box must be scaled by the same factor"
     },
     {
@@ -343,10 +343,10 @@
       "source": "openmmapi/src/NonbondedForceImpl.cpp",
       "symbol": "NonbondedForceImpl::calcDispersionCorrection",
       "scientific_quantity": "long-range dispersion energy coefficient",
-      "precondition": "periodic cutoff method, at most 100 particles, with or without switching function",
+      "precondition": "periodic cutoff method, at most 100 particles, with or without switching function (width at least 3% of the cutoff)",
       "invariant": "the coefficient equals the integrated Lennard-Jones tail beyond the cutoff (plus the part removed by the switch) averaged over all particle pairs",
       "observation_point": "return value",
-      "alarm": "relative disagreement with a composite Simpson quadrature exceeds 1e-6",
+      "alarm": "relative disagreement with a composite Simpson quadrature (log r in the switched region) exceeds 1e-6 of the summed repulsive and attractive tail magnitudes",
       "rationale": "an independent route to the same physical integral"
     },
     {
@@ -395,7 +395,7 @@
       "source": "openmmapi/src/NoseHooverIntegrator.cpp",
       "symbol": "NoseHooverIntegrator::initializeThermostats",
       "scientific_quantity": "thermostat degrees of freedom",
-      "precondition": "chains of single (non-paired) particles that do not overlap",
+      "precondition": "chains of single (non-paired) massive particles that do not overlap",
       "invariant": "total DOF = 3 per massive thermostated particle - 1 per constraint between two massive thermostated particles - 3 if a CMMotionRemover is present",
       "observation_point": "after the CM-removal adjustment",
       "alarm": "sum of chain DOF differs from the independently counted value",
@@ -411,7 +411,7 @@
       "precondition": "any continuous tabulated function (the last node of a periodic dimension is identified with the first and not checked)",
       "invariant": "the spline reproduces the stored value at every grid node (node positions recomputed from min, max, count)",
       "observation_point": "end of the constructor",
-      "alarm": "value differs from the stored one by more than 1000*eps*max|value|",
+      "alarm": "value differs from the stored one by more than 1000*eps*max|value| (the last node is the upper limit itself)",
       "rationale": "an interpolating table must return its data"
     },
     {
@@ -463,7 +463,7 @@
       "precondition": "conjugate-gradient solver",
       "invariant": "at exit the gradient of the energy with respect to electrode charges (projected onto the constraint plane when active) is within the requested tolerance",
       "observation_point": "after the charge solve (gradient recomputed independently)",
-      "alarm": "squared projected residual exceeds 4*tol^2*N",
+      "alarm": "squared projected residual exceeds 4*tol^2*N plus a rounding floor from the zero-charge potentials",
       "rationale": "the charges must satisfy the constant-potential condition to the requested accuracy"
     },
     {
@@ -474,9 +474,9 @@
       "symbol": "ReferenceMinimize::minimize",
       "scientific_quantity": "potential energy along a minimization",
       "precondition": "System without distance constraints (the objective is then the potential energy)",
-      "invariant": "a line-search minimizer does not end above its starting energy",
+      "invariant": "a line-search minimizer does not end above its starting energy, and the Context holds the point lbfgs returns",
       "observation_point": "after lbfgs returns",
-      "alarm": "final energy exceeds the first evaluated energy by more than 64*eps*(|e0|+|e1|)",
+      "alarm": "final energy exceeds the first evaluated energy by more than 64*eps*(|e0|+|e1|), or the positions in the Context differ from the returned minimum",
       "rationale": "minimization must not make the energy worse"
     }
   ]
