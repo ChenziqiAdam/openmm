@@ -3374,9 +3374,12 @@ void ReferenceRemoveCMMotionKernel::execute(ContextImpl& context) {
     // Calculate the center of mass momentum.
     
     double momentum[] = {0.0, 0.0, 0.0};
-    double mass = 0.0, sanScale = 0.0;
+    double mass = 0.0;
+    double sanScale = 0.0;
+    if (sanitizer::enabled())
+        for (size_t i = 0; i < masses.size(); ++i)
+            sanScale += masses[i]*sanitizer::norm(velData[i]);
     for (size_t i = 0; i < masses.size(); ++i) {
-        sanScale += masses[i]*sanitizer::norm(velData[i]);
         momentum[0] += masses[i]*velData[i][0];
         momentum[1] += masses[i]*velData[i][1];
         momentum[2] += masses[i]*velData[i][2];
