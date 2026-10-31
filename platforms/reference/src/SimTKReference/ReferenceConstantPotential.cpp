@@ -562,7 +562,23 @@ void ReferenceConstantPotential::sanitizeSolution(int numParticles, int numElect
         for (int ii = 0; ii < numElectrodeParticles; ii++)
             norm0 += grad0[ii]*grad0[ii];
         double floorError = 64*64*sanitizer::EPS*sanitizer::EPS*norm0;
-        if (error > 4*target + floorError)
+        // The conjugate gradient method only converges for a positive definite matrix (the direct solver rejects any
+        // other), so the convergence law is checked only when the Hessian is.  Building it costs one derivative
+        // evaluation per electrode particle, so it is skipped (and so is the check) for large electrodes.
+        bool wellPosed = numElectrodeParticles <= 256;
+        if (wellPosed && error > 4*target + floorError) {
+            TNT::Array2D<double> A(numElectrodeParticles, numElectrodeParticles);
+            std::vector<double> dUdQ(numElectrodeParticles);
+            for (int ii = 0; ii < numElectrodeParticles; ii++) {
+                zeroCharges[elecToSys[ii]] = 1.0;
+                getDerivatives(numParticles, numElectrodeParticles, posData, zeroCharges, exclusions, sysToElec, elecToSys, electrodeParamArray, dUdQ, pme);
+                zeroCharges[elecToSys[ii]] = 0.0;
+                for (int jj = 0; jj <= ii; jj++)
+                    A[ii][jj] = A[jj][ii] = dUdQ[jj]-grad0[jj];
+            }
+            wellPosed = JAMA::Cholesky<double>(A).is_spd();
+        }
+        if (wellPosed && error > 4*target + floorError)
             sanitizer::alarm("CP-002", "constant_potential_convergence", "residual " + sanitizer::num(error, target));
     }
 }
