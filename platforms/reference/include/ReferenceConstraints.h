@@ -67,6 +67,7 @@ public:
     void applyToVelocities(std::vector<OpenMM::Vec3>& atomCoordinates, std::vector<OpenMM::Vec3>& velocities, std::vector<double>& inverseMasses, double tolerance);
     std::vector<int> sanAtom1, sanAtom2;
     std::vector<double> sanDistance;
+    std::vector<bool> sanSettle;
     ReferenceConstraintAlgorithm* ccma;
     ReferenceConstraintAlgorithm* settle;
 };

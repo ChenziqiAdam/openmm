@@ -32,6 +32,7 @@
 #include "ReferenceSETTLEAlgorithm.h"
 #include "openmm/HarmonicAngleForce.h"
 #include "openmm/OpenMMException.h"
+#include <cfloat>
 #include <map>
 #include <utility>
 #include "openmm/internal/Sanitizer.h"
@@ -148,6 +149,12 @@ ReferenceConstraints::ReferenceConstraints(const System& system) : ccma(NULL), s
             settle = new ReferenceSETTLEAlgorithm(atom1, atom2, atom3, distance1, distance2, masses);
     }
 
+    // SETTLE stores the constrained distances as floats.
+
+    sanSettle.assign(atom1.size(), false);
+    for (unsigned i = 0; i < atom1.size(); i++)
+        sanSettle[i] = isSettleAtom[atom1[i]];
+
     // All other constraints are handled with CCMA.
 
     vector<int> ccmaConstraints;
@@ -214,6 +221,8 @@ void ReferenceConstraints::apply(vector<OpenMM::Vec3>& atomCoordinates, vector<O
         // Beyond the tolerance, the distance cannot be represented better than the spacing of the coordinates.
         double xmax = max(sanitizer::norm(atomCoordinatesP[sanAtom1[i]]), sanitizer::norm(atomCoordinatesP[sanAtom2[i]]));
         double allowed = 2*tolerance + 1e-12 + 16*sanitizer::EPS*xmax/sanDistance[i];
+        if (sanSettle[i])
+            allowed += FLT_EPSILON;
         if (err/allowed > worstRatio) {
             worstRatio = err/allowed;
             worst = err;
