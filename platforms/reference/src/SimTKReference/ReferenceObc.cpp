@@ -144,6 +144,14 @@ void ReferenceObc::computeBornRadii(const vector<Vec3>& atomCoordinates, vector<
 
     // ---------------------------------------------------------------------------------------
 
+    // The bound below assumes every offset radius is positive (an atomic radius no larger than the dielectric offset is outside the model).
+
+    bool sanOffsetsPositive = true;
+    if (sanitizer::enabled())
+        for (int atomI = 0; atomI < numberOfAtoms; atomI++)
+            if (!(atomicRadii[atomI] > dielectricOffset))
+                sanOffsetsPositive = false;
+
     // calculate Born radii
 
     for (int atomI = 0; atomI < numberOfAtoms; atomI++) {
@@ -208,7 +216,7 @@ void ReferenceObc::computeBornRadii(const vector<Vec3>& atomCoordinates, vector<
        
        bornRadii[atomI]      = 1.0/(1.0/offsetRadiusI - tanhSum/radiusI); 
        // Descreening by neighbors can only push the effective Born radius outward from the offset intrinsic radius.
-       if (sanitizer::enabled() && !(bornRadii[atomI] >= offsetRadiusI*(1-64*sanitizer::EPS) && std::isfinite(bornRadii[atomI])))
+       if (sanitizer::enabled() && sanOffsetsPositive && !(bornRadii[atomI] >= offsetRadiusI*(1-64*sanitizer::EPS) && std::isfinite(bornRadii[atomI])))
            sanitizer::alarm("GB-001", "born_radius_bound", "Born radius " + sanitizer::num(bornRadii[atomI], offsetRadiusI));
  
        obcChain[atomI]       = offsetRadiusI*(alphaObc - 2.0*betaObc*sum + 3.0*gammaObc*sum2);
