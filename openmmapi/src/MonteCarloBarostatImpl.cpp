@@ -49,6 +49,7 @@ void MonteCarloBarostatImpl::initialize(ContextImpl& context) {
     if (!context.getSystem().usesPeriodicBoundaryConditions())
         throw OpenMMException("A barostat cannot be used with a non-periodic system");
     kernel = context.getPlatform().createKernel(ApplyMonteCarloBarostatKernel::Name(), context);
+    scaleAsRigid = owner.getScaleMoleculesAsRigid();
     kernel.getAs<ApplyMonteCarloBarostatKernel>().initialize(context.getSystem(), owner, 1, owner.getScaleMoleculesAsRigid());
     Vec3 box[3];
     context.getPeriodicBoxVectors(box[0], box[1], box[2]);
@@ -87,7 +88,8 @@ void MonteCarloBarostatImpl::updateContextState(ContextImpl& context, bool& forc
         vector<Vec3> sanAfter;
         context.getPositions(sanAfter);
         vector<vector<int> > units;
-        if (owner.getScaleMoleculesAsRigid())
+        // The kernel scales with the setting it was initialized with, not a later change to the Force.
+        if (scaleAsRigid)
             units = context.getMolecules();
         else
             for (int i = 0; i < context.getSystem().getNumParticles(); i++)

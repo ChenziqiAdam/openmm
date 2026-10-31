@@ -60,6 +60,7 @@ private:
     const MonteCarloBarostat& owner;
     int step, numAttempted, numAccepted;
     double volumeScale;
+    bool scaleAsRigid;
     Kernel kernel;
 };
 

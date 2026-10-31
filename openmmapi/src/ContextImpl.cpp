@@ -425,8 +425,9 @@ const vector<vector<int> >& ContextImpl::getMolecules() const {
                     for (int j = 0; j < system.getVirtualSite(i).getNumParticles(); j++)
                         if (owner[i] != owner[system.getVirtualSite(i).getParticle(j)])
                             joined = false;
-            for (int f = 0; f < system.getNumForces(); f++) {
-                const HarmonicBondForce* bonds = dynamic_cast<const HarmonicBondForce*>(&system.getForce(f));
+            // Forces added to the System after this Context was created are not part of it, so read the forces it holds.
+            for (auto impl : forceImpls) {
+                const HarmonicBondForce* bonds = dynamic_cast<const HarmonicBondForce*>(&impl->getOwner());
                 if (bonds != NULL)
                     for (int i = 0; i < bonds->getNumBonds(); i++) {
                         int p1, p2;
