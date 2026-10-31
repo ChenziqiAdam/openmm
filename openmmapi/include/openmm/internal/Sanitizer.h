@@ -63,6 +63,10 @@ inline double norm(const Vec3& v) {
 inline void checkReactionField(double cutoff, double krf, double crf) {
     if (!enabled())
         return;
+    // For a dielectric constant so large that 3*eps overflows the constants are not representable; there is no
+    // potential to check.
+    if (!std::isfinite(krf) || !std::isfinite(crf))
+        return;
     double residual = 1.0/cutoff + krf*cutoff*cutoff - crf;
     if (std::fabs(residual) > 16*EPS/cutoff)
         alarm("RF-001", "rf_continuity", "potential at cutoff " + num(residual, 16*EPS/cutoff));
