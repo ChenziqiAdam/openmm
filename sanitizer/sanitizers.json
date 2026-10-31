@@ -5,7 +5,7 @@
   "fork": "ChenziqiAdam/openmm",
   "branch": "scibench-new-core-pilot",
   "base_commit": "ad0c51cf041081c138507e23cdbf8360d983ac4e",
-  "instrumented_commit": "6dbcf5aabcc333c81fdf24fe48672a145b835da6",
+  "instrumented_commit": "40b5ced5ad9a02553edfaca8234b756e11fc4e01",
   "log_env": "OPENMM_SANITIZE_LOG",
   "platform": "Reference",
   "n_ids": 36,
